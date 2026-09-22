@@ -29,6 +29,7 @@ test('sitemap includes database products and services with real update dates, ex
   assert.match(xml, /https:\/\/catalog\.example\/catalog\/rails\/product\/rail/);
   assert.match(xml, /https:\/\/catalog\.example\/services\/cutting/);
   assert.match(xml, /2026-03-01T12:30:00.000Z/);
+  assert.ok(xml.includes('<loc>https://catalog.example/calculator</loc>'), 'страница калькулятора должна быть в карте сайта');
   assert.ok(!xml.includes('/admin') && !xml.includes('/cart'));
   assert.equal((xml.match(/<lastmod>/g) || []).length, 2);
   assert.match(seo.robots(), /Sitemap: https:\/\/catalog\.example\/sitemap.xml/);
@@ -54,6 +55,6 @@ test('large catalogs split into valid sitemap chunks', async () => {
   });
   assert.match(await seo.sitemap(), /<sitemapindex/);
   assert.equal(((await seo.sitemap(1)).match(/<url>/g) || []).length, 45000);
-  assert.equal(((await seo.sitemap(2)).match(/<url>/g) || []).length, 9);
+  assert.equal(((await seo.sitemap(2)).match(/<url>/g) || []).length, 10);
   await assert.rejects(seo.sitemap(3), error => error.getStatus() === 404);
 });

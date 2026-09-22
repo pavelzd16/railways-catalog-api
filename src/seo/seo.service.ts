@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   '/contacts',
   '/delivery',
   '/price',
+  '/calculator',
   '/privacy',
 ];
 type Entry = { path: string; updatedAt?: Date };
