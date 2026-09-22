@@ -55,6 +55,6 @@ test('large catalogs split into valid sitemap chunks', async () => {
   });
   assert.match(await seo.sitemap(), /<sitemapindex/);
   assert.equal(((await seo.sitemap(1)).match(/<url>/g) || []).length, 45000);
-  assert.equal(((await seo.sitemap(2)).match(/<url>/g) || []).length, 10);
+  assert.equal(((await seo.sitemap(2)).match(/<url>/g) || []).length, 9);
   await assert.rejects(seo.sitemap(3), error => error.getStatus() === 404);
 });

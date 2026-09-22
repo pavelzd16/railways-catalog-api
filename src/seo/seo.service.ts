@@ -11,7 +11,6 @@ const PUBLIC_PATHS = [
   '/about',
   '/contacts',
   '/delivery',
-  '/price',
   '/calculator',
   '/privacy',
 ];
