@@ -5,9 +5,11 @@ on:
     branches:
       - main
 
-  workflow_run:
-    workflows: ['Backend CI']
-    types: [completed]
+# Выкатка идёт на один боевой сервер: параллельные прогоны дерутся за
+# docker compose и падают на «removal of container ... is already in progress».
+concurrency:
+  group: backend-cd
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -26,7 +28,6 @@ jobs:
           fetch-depth: 0
 
       - name: Login to GHCR
-        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -34,7 +35,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Docker Image
-        if: github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
           context: .
