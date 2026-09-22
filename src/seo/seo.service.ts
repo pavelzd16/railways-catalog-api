@@ -11,7 +11,7 @@ const PUBLIC_PATHS = [
   '/about',
   '/contacts',
   '/delivery',
-  '/price',
+  '/calculator',
   '/privacy',
 ];
 type Entry = { path: string; updatedAt?: Date };
@@ -37,15 +37,29 @@ export class SeoService {
         orderBy: { id: 'asc' },
       }),
       this.prisma.category.findMany({
-        select: { slug: true },
+        select: {
+          slug: true,
+          // Пустая подкатегория — страница без товаров, в карту её не отдаём.
+          subcategories: {
+            select: { slug: true },
+            where: { products: { some: {} } },
+            orderBy: { name: 'asc' },
+          },
+        },
         orderBy: { id: 'asc' },
       }),
     ]);
     const entries: Entry[] = [
       ...PUBLIC_PATHS.map((path) => ({ path })),
-      ...categories.map((category) => ({
-        path: `/catalog?${new URLSearchParams({ category: category.slug })}`,
-      })),
+      // Порядок параметров совпадает с canonical сайта: category, затем subcategory.
+      ...categories.flatMap((category) => [
+        {
+          path: `/catalog?${new URLSearchParams({ category: category.slug })}`,
+        },
+        ...category.subcategories.map((subcategory) => ({
+          path: `/catalog?${new URLSearchParams({ category: category.slug, subcategory: subcategory.slug })}`,
+        })),
+      ]),
       ...products.map((product) => ({
         path: productPath(product),
         updatedAt: product.updatedAt,
