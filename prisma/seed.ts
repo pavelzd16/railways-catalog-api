@@ -66,7 +66,7 @@ const prisma = new PrismaClient({
 const catalogPath = path.resolve(
   process.cwd(),
   'data',
-  'tdtransmet-catalog.json',
+  'catalog.json',
 )
 
 function readCatalog(): Catalog {
