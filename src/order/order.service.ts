@@ -11,13 +11,17 @@ import { FindOrdersDto, OrderSort } from './dto/find-orders.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { OrdersRdo } from './rdo/orders.rdo';
 import { OrderRdo } from './rdo/order.rdo';
+import { NotifyService } from 'src/notify/notify.service';
 import type { Prisma } from 'generated/prisma/client';
 
 type OrderWithItems = Prisma.OrderGetPayload<{ include: { items: true } }>;
 
 @Injectable()
 export class OrderService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notify: NotifyService,
+  ) {}
 
   private mapOrderToDto(o: OrderWithItems) {
     return {
@@ -205,6 +209,9 @@ export class OrderService {
       },
       include: { items: true },
     });
+
+    // Письмо уходит в фоне: клиент не ждёт почтовый сервер.
+    void this.notify.orderCreated(order);
 
     return fillDto(OrderRdo, this.mapOrderToDto(order));
   }

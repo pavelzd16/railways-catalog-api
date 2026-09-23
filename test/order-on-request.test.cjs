@@ -15,7 +15,8 @@ function setup(products) {
       },
     },
   };
-  return { service: new OrderService(prisma), created };
+  const notify = { orderCreated: () => Promise.resolve() };
+  return { service: new OrderService(prisma, notify), created };
 }
 
 // Каталог ВСП весь «по запросу»: цена либо null, либо 0.

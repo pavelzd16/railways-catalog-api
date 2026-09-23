@@ -7,6 +7,7 @@ import { FindRequestsDto, RequestSort } from './dto/find-requests.dto';
 import { RequestsRdo } from './rdo/requests.rdo';
 import { RequestRdo } from './rdo/request.rdo';
 import { FileService } from 'src/file/file.service';
+import { NotifyService } from 'src/notify/notify.service';
 import type { Prisma } from 'generated/prisma/client';
 
 type RequestWithRelations = Prisma.RequestGetPayload<{
@@ -18,6 +19,7 @@ export class RequestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fileService: FileService,
+    private readonly notify: NotifyService,
   ) {}
 
   private mapRequestToDto(r: RequestWithRelations) {
@@ -209,6 +211,14 @@ export class RequestService {
         product: true,
       },
     });
+
+    // Письмо уходит в фоне, файлы клиента — вложениями как он их назвал.
+    void this.notify.requestCreated(
+      request,
+      [requestFile, partnerMapFile]
+        .filter((file) => file !== undefined)
+        .map((file) => ({ filename: file.originalname, content: file.buffer })),
+    );
 
     return fillDto(RequestRdo, this.mapRequestToDto(request));
   }

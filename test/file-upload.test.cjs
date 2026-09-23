@@ -28,7 +28,7 @@ Reflect.decorate(
 );
 UploadedFiles()(UploadController.prototype, 'images', 0);
 Reflect.decorate(
-  [Post('attachments'), UseInterceptors(FileFieldsInterceptor([{ name: 'requestFile', maxCount: 1 }, { name: 'partnerMapFile', maxCount: 1 }], { storage: memoryStorage(), limits: { fileSize: 10 * MB } }))],
+  [Post('attachments'), UseInterceptors(FileFieldsInterceptor([{ name: 'requestFile', maxCount: 1 }, { name: 'partnerMapFile', maxCount: 1 }], { storage: memoryStorage(), defParamCharset: 'utf8', limits: { fileSize: 10 * MB } }))],
   UploadController.prototype, 'attachments', describeMethod('attachments'),
 );
 UploadedFiles()(UploadController.prototype, 'attachments', 0);
@@ -88,4 +88,13 @@ test('named file fields arrive separately', async () => {
     .attach('partnerMapFile', Buffer.from('2'), 'karta.pdf')
     .expect(201);
   assert.deepEqual(response.body, { requestFile: ['zayavka.pdf'], partnerMapFile: ['karta.pdf'] });
+});
+
+// Имя файла клиента уходит вложением в письмо о заявке — оно должно остаться читаемым.
+test('a Cyrillic file name of a request attachment survives the upload', async () => {
+  const response = await request(app.getHttpServer())
+    .post('/upload/attachments')
+    .attach('requestFile', Buffer.from('1'), 'Смета на рельсы.pdf')
+    .expect(201);
+  assert.deepEqual(response.body, { requestFile: ['Смета на рельсы.pdf'] });
 });
