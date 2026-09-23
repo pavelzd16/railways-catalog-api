@@ -93,6 +93,14 @@ export class RequestService {
       where.productId = query.productId;
     }
 
+    if (query.type === 'service') {
+      where.serviceId = { not: null };
+    }
+
+    if (query.type === 'product') {
+      where.productId = { not: null };
+    }
+
     if (query.search) {
       const search = query.search.trim();
       where.OR = [
