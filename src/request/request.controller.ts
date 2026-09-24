@@ -43,6 +43,9 @@ export class RequestController {
       ],
       {
         storage: memoryStorage(),
+        // Браузер шлёт имя файла в UTF-8, а multer по умолчанию читает его как latin1:
+        // «Смета.pdf» превращалась в «Ð¡Ð¼ÐµÑ‚Ð°.pdf» во вложении письма.
+        defParamCharset: 'utf8',
         limits: { fileSize: 10 * 1024 * 1024 },
         fileFilter: (req, file, cb) => {
           const allowedMimeTypes = [
