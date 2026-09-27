@@ -5,6 +5,7 @@ import { PrismaModule } from 'prisma/prisma.module';
 import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { LoginAttemptsService } from './login-attempts.service';
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
       secret: process.env.JWT_SECRET,
     }),
   ],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard],
+  providers: [AuthService, JwtStrategy, JwtAuthGuard, LoginAttemptsService],
   controllers: [AuthController],
   exports: [JwtAuthGuard],
 })
