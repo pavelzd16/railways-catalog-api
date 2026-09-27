@@ -5,7 +5,10 @@ import {
   UseGuards,
   Request,
   Get,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { LoginRateLimitException } from './login-attempts.service';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -20,8 +23,19 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      return await this.authService.login(dto);
+    } catch (error) {
+      if (error instanceof LoginRateLimitException) {
+        response.setHeader('Retry-After', error.retryAfter);
+      }
+      throw error;
+    }
   }
 
   @UseGuards(JwtAuthGuard)

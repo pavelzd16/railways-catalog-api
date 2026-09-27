@@ -15,9 +15,11 @@ import { AuthTokenRdo } from './rdo/auth-token.rdo';
 import { UserRdo } from './rdo/user.rdo';
 import * as bcrypt from 'bcrypt';
 import type { User } from 'generated/prisma/client';
+import { LoginAttemptsService } from './login-attempts.service';
 
 const DEFAULT_USERNAME = 'admin';
 const DEFAULT_PASSWORD = 'admin';
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('invalid-login-timing-check', 10);
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -26,6 +28,7 @@ export class AuthService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly loginAttempts: LoginAttemptsService,
   ) {}
 
   async onModuleInit() {
@@ -70,19 +73,19 @@ export class AuthService implements OnModuleInit {
   }
 
   async login(dto: LoginDto): Promise<AuthTokenRdo> {
-    const user = await this.prisma.user.findUnique({
-      where: { username: dto.username },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('Неверный логин или пароль');
-    }
-
-    const isPasswordValid = await bcrypt.compare(dto.password, user.password);
-
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Неверный логин или пароль');
-    }
+    const user = await this.loginAttempts.authenticate(
+      dto.username,
+      async (tx) => {
+        const found = await tx.user.findUnique({
+          where: { username: dto.username.trim() },
+        });
+        const valid = await bcrypt.compare(
+          dto.password,
+          found?.password ?? DUMMY_PASSWORD_HASH,
+        );
+        return found && valid ? found : null;
+      },
+    );
 
     const token = await this.generateToken(user);
 
