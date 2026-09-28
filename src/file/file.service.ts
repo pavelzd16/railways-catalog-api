@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { variantPathsFor } from './image-variants';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 
@@ -45,6 +46,12 @@ export class FileService {
     } catch {
       // Файл может уже не существовать
     }
+
+    await Promise.all(
+      variantPathsFor(UPLOAD_DIR, fileName).map((path) =>
+        fs.unlink(path).catch(() => undefined),
+      ),
+    );
   }
 
   async deleteFiles(filePaths: string[]): Promise<void> {
