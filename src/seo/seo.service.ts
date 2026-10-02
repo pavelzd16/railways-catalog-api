@@ -16,6 +16,19 @@ const PUBLIC_PATHS = [
 ];
 type Entry = { path: string; updatedAt?: Date };
 
+function touch(dates: Map<string, Date>, key: string, date: Date) {
+  const known = dates.get(key);
+  if (!known || date > known) dates.set(key, date);
+}
+
+function newest(items: { updatedAt: Date }[]): Date | undefined {
+  return items.reduce<Date | undefined>(
+    (latest, { updatedAt }) =>
+      !latest || updatedAt > latest ? updatedAt : latest,
+    undefined,
+  );
+}
+
 @Injectable()
 export class SeoService {
   private readonly origin = getSiteUrl();
@@ -49,15 +62,37 @@ export class SeoService {
         orderBy: { id: 'asc' },
       }),
     ]);
+    // Своей даты изменения у разделов и категорий в базе нет: берём самый свежий товар внутри —
+    // список на странице меняется вместе с ним. Страницам без своей даты (главная, «О компании»,
+    // пустой раздел) ставим дату последнего изменения каталога.
+    const categoryUpdatedAt = new Map<string, Date>();
+    const subcategoryUpdatedAt = new Map<string, Date>();
+    for (const product of products) {
+      touch(categoryUpdatedAt, product.category.slug, product.updatedAt);
+      if (product.subcategory)
+        touch(
+          subcategoryUpdatedAt,
+          product.subcategory.slug,
+          product.updatedAt,
+        );
+    }
+    const siteUpdatedAt = newest([...products, ...services]);
+    const servicesUpdatedAt = newest(services) ?? siteUpdatedAt;
     const entries: Entry[] = [
-      ...PUBLIC_PATHS.map((path) => ({ path })),
+      ...PUBLIC_PATHS.map((path) => ({
+        path,
+        updatedAt: path === '/services' ? servicesUpdatedAt : siteUpdatedAt,
+      })),
       // Порядок параметров совпадает с canonical сайта: category, затем subcategory.
       ...categories.flatMap((category) => [
         {
           path: `/catalog?${new URLSearchParams({ category: category.slug })}`,
+          updatedAt: categoryUpdatedAt.get(category.slug) ?? siteUpdatedAt,
         },
         ...category.subcategories.map((subcategory) => ({
           path: `/catalog?${new URLSearchParams({ category: category.slug, subcategory: subcategory.slug })}`,
+          updatedAt:
+            subcategoryUpdatedAt.get(subcategory.slug) ?? siteUpdatedAt,
         })),
       ]),
       ...products.map((product) => ({
@@ -105,7 +140,18 @@ export class SeoService {
     );
   }
 
+  // Clean-param понимает Яндекс: адреса с метками рекламы склеиваются с чистыми. category и subcategory
+  // сюда не добавлять — на них держатся страницы каталога.
   robots(): string {
-    return `User-agent: *\nAllow: /\nDisallow: /admin\n\nSitemap: ${this.origin}/sitemap.xml\n`;
+    return [
+      'User-agent: *',
+      'Allow: /',
+      'Disallow: /admin',
+      'Disallow: /cart',
+      'Clean-param: utm_source&utm_medium&utm_campaign&utm_content&utm_term&yclid&gclid&from',
+      '',
+      `Sitemap: ${this.origin}/sitemap.xml`,
+      '',
+    ].join('\n');
   }
 }
