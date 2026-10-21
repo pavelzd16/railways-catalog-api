@@ -87,4 +87,47 @@ export class NotifyService {
       );
     }
   }
+
+  async chatMessageCreated(message: {
+    id: number;
+    body: string;
+    conversation: {
+      id: string;
+      visitorName: string;
+      contact: string | null;
+      pageUrl: string | null;
+    };
+  }): Promise<boolean> {
+    if (!this.transport) return false;
+    const conversation = message.conversation;
+    const link = this.siteUrl
+      ? `${this.siteUrl}/admin/chats?conversation=${encodeURIComponent(conversation.id)}`
+      : '';
+    try {
+      await this.transport.sendMail({
+        from: this.from,
+        to: process.env.CHAT_NOTIFY_EMAIL || this.to,
+        subject: '[ПроРельс] Новое сообщение в чате',
+        text: [
+          `Посетитель: ${conversation.visitorName}`,
+          conversation.contact ? `Контакт: ${conversation.contact}` : '',
+          conversation.pageUrl ? `Страница: ${conversation.pageUrl}` : '',
+          '',
+          message.body,
+          '',
+          link
+            ? `Ответить в админке: ${link}`
+            : 'Ответьте посетителю в разделе «Чаты» админки.',
+        ]
+          .filter((line) => line !== '')
+          .join('\n'),
+      });
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Уведомление чата #${message.id} не отправлено: ${error instanceof Error ? error.message : 'ошибка SMTP'}`,
+      );
+      return false;
+    }
+  }
 }

@@ -11,6 +11,13 @@ import {
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Only explicitly configured proxies may supply the visitor IP for chat limits.
+  if (process.env.TRUST_PROXY) {
+    app.set(
+      'trust proxy',
+      process.env.TRUST_PROXY.split(',').map((value) => value.trim()),
+    );
+  }
 
   // Раньше статики: иначе готовую копию из uploads/w отдал бы express.static со своими заголовками.
   app.use('/uploads/w', createVariantHandler(join(process.cwd(), 'uploads')));

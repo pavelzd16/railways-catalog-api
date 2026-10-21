@@ -195,3 +195,44 @@ model LoginAttempt {
 
   @@index([expiresAt])
 }
+
+enum ChatSender {
+  VISITOR
+  MANAGER
+}
+
+model ChatConversation {
+  id               String   @id @default(uuid())
+  tokenHash        String   @unique
+  visitorName      String
+  contact          String?
+  pageUrl          String?
+  policyAcceptedAt DateTime
+  expiresAt        DateTime
+  closed           Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  messages         ChatMessage[]
+
+  @@index([updatedAt])
+}
+
+model ChatMessage {
+  id                 Int        @id @default(autoincrement())
+  conversationId     String
+  conversation       ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  clientId           String
+  sender             ChatSender
+  body               String
+  createdAt          DateTime   @default(now())
+  readAt             DateTime?
+  notificationSentAt DateTime?
+  notificationDueAt  DateTime?
+  notificationLockAt DateTime?
+  notificationTries  Int        @default(0)
+
+  @@unique([conversationId, sender, clientId])
+  @@index([conversationId, id])
+  @@index([conversationId, sender, readAt])
+  @@index([notificationDueAt])
+}

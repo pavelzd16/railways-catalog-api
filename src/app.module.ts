@@ -9,6 +9,7 @@ import { OrderModule } from './order/order.module';
 import { StatsModule } from './stats/stats.module';
 import { AuthModule } from './auth/auth.module';
 import { SeoModule } from './seo/seo.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SeoModule } from './seo/seo.module';
     StatsModule,
     AuthModule,
     SeoModule,
+    ChatModule,
   ],
   controllers: [],
   providers: [],
