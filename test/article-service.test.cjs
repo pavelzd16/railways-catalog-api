@@ -71,6 +71,8 @@ test('пропавший из каталога артикул в карточк�
   const full = await service.findOneBySlug('a');
   assert.deepEqual(full.products.map((p) => p.sku), ['TM-0001']);
   assert.equal(full.products[0].categoryName, 'Рельсы');
+  assert.equal(full.products[0].condition, 'new');
+  assert.equal(typeof full.products[0].specs[0].value, 'string');
   assert.deepEqual({ ...full.products[0].specs[0] }, { label: 'Длина', value: '12', unit: 'м' });
 });
 

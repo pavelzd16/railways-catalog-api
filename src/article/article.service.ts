@@ -132,7 +132,7 @@ export class ArticleService {
           title: p.title,
           price: p.price,
           stock: p.stock,
-          condition: p.condition,
+          condition: p.condition.toLowerCase(),
           images: p.images,
           categorySlug: p.category.slug,
           subcategorySlug: p.subcategory?.slug ?? null,
