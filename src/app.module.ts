@@ -10,6 +10,7 @@ import { StatsModule } from './stats/stats.module';
 import { AuthModule } from './auth/auth.module';
 import { SeoModule } from './seo/seo.module';
 import { ChatModule } from './chat/chat.module';
+import { ArticleModule } from './article/article.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ChatModule } from './chat/chat.module';
     AuthModule,
     SeoModule,
     ChatModule,
+    ArticleModule,
   ],
   controllers: [],
   providers: [],
