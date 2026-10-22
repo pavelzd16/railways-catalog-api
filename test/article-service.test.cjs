@@ -130,3 +130,11 @@ test('повторный slug (P2002) при create и update -> ConflictExcepti
   );
   await assert.rejects(() => service.update('a', { slug: 'b' }), ConflictException);
 });
+
+test('админский список отдаёт published:false для черновика, публичный — true', async () => {
+  const { service } = setup({ articles: [art('d', 'Рельсы', '<p>x</p>', { published: false }), art('p', 'Рельсы')] });
+  const admin = await service.findAllAdmin({ page: 1, limit: 12, skip: 0, take: 12 });
+  assert.deepEqual(admin.items.map((a) => [a.id, a.published]), [['d', false], ['p', true]]);
+  const pub = await service.findPublished({ page: 1, limit: 12, skip: 0, take: 12 });
+  assert.deepEqual(pub.items.map((a) => a.published), [true]);
+});

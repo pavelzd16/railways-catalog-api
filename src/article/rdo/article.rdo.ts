@@ -30,6 +30,10 @@ export class ArticleListItemRdo {
 
   @Expose()
   readingMinutes!: number;
+
+  // В публичном списке всегда true; в админском отличает черновики.
+  @Expose()
+  published!: boolean;
 }
 
 export class ArticleSpecRdo {
@@ -102,10 +106,6 @@ export class ArticleServiceRdo {
 export class ArticleRdo extends ArticleListItemRdo {
   @Expose()
   body!: string;
-
-  // Для предпросмотра черновика в админке.
-  @Expose()
-  published!: boolean;
 
   @Expose()
   @Type(() => ArticleProductRdo)

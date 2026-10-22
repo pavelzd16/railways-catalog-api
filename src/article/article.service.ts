@@ -62,6 +62,7 @@ export class ArticleService {
       publishedAt: a.publishedAt,
       updatedAt: a.updatedAt,
       readingMinutes: readingMinutes(a.body),
+      published: a.published,
     };
   }
 
@@ -198,7 +199,6 @@ export class ArticleService {
     return fillDto(ArticleRdo, {
       ...this.mapListItem(article),
       body: article.body,
-      published: article.published,
       products,
       services,
       related: related.map((a) => this.mapListItem(a)),
