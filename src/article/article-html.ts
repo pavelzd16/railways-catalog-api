@@ -29,7 +29,7 @@ function isUnsafeUrl(rawValue: string): boolean {
   return normalized.startsWith('data:') && !normalized.startsWith('data:image/');
 }
 
-function cleanTag(tag: string, name: string, rest: string): string {
+function cleanTag(name: string, rest: string): string {
   const attrs: string[] = [];
   const attrRe = /([^\s\/"'=<>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]*))?/g;
   for (const m of rest.matchAll(attrRe)) {
@@ -39,18 +39,24 @@ function cleanTag(tag: string, name: string, rest: string): string {
     attrs.push(m[0]);
   }
   const selfClose = /\/\s*$/.test(rest) ? ' /' : '';
-  void tag;
   return '<' + name + attrs.map((a) => ' ' + a).join('') + selfClose + '>';
 }
 
 export function cleanArticleHtml(html: string): string {
   let out = String(html ?? '').replace(/\r\n?/g, '\n');
   // Опасные парные теги вместе с содержимым, затем одиночные/незакрытые остатки.
-  out = out.replace(/<(script|style|iframe|object|embed)(?![a-z0-9])[^>]*>[^]*?<\/\1\s*>/gi, '');
-  out = out.replace(/<\/?(?:script|style|iframe|object|embed)(?![a-z0-9])[^>]*>/gi, '');
+  // Повторяем до стабильного результата: вложение <scr<script>ipt> иначе собирается заново.
+  for (let i = 0; i < 20; i++) {
+    const before = out;
+    out = out.replace(/<(script|style|iframe|object|embed)(?![a-z0-9])[^>]*>[^]*?<\/\1\s*>/gi, '');
+    out = out.replace(/<\/?(?:script|style|iframe|object|embed)(?![a-z0-9])[^>]*>/gi, '');
+    if (out === before) break;
+  }
+  // Страховка: если после лимита что-то осталось, убираем сам «<».
+  out = out.replace(/<(?=\/?(?:script|style|iframe|object|embed)(?![a-z0-9]))/gi, '');
   // Атрибуты чистим внутри каждого тега с учётом кавычек (в значении может быть «>»).
-  out = out.replace(/<([a-z][^\s>\/]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/gi, (tag, name: string, rest: string) =>
-    cleanTag(tag, name, rest),
+  out = out.replace(/<([a-z][^\s>\/]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/gi, (_tag, name: string, rest: string) =>
+    cleanTag(name, rest),
   );
   return out;
 }

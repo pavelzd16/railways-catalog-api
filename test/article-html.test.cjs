@@ -57,3 +57,9 @@ test('cleanArticleHtml: action, formaction, xlink:href, srcdoc', () => {
 test('cleanArticleHtml: <SCRIPT> в верхнем регистре', () => {
   assert.equal(cleanArticleHtml('a<SCRIPT>alert(1)</SCRIPT>b'), 'ab');
 });
+
+test('cleanArticleHtml: вложенные теги не собираются заново', () => {
+  for (const h of ['<scr<script>ipt>alert(1)</scr<script>ipt>', '<scr<script>ipt>alert(1)', '<ifr<iframe>ame src=x>']) {
+    assert.ok(!/<\/?(script|style|iframe|object|embed)/i.test(cleanArticleHtml(h)), h);
+  }
+});
