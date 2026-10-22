@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   '/contacts',
   '/delivery',
   '/calculator',
+  '/stati',
   '/privacy',
 ];
 type Entry = { path: string; updatedAt?: Date };
@@ -35,7 +36,7 @@ export class SeoService {
   constructor(private readonly prisma: PrismaService) {}
 
   async sitemap(part?: number): Promise<string> {
-    const [products, services, categories] = await Promise.all([
+    const [products, services, articles, categories] = await Promise.all([
       this.prisma.product.findMany({
         select: {
           slug: true,
@@ -46,6 +47,12 @@ export class SeoService {
         orderBy: { id: 'asc' },
       }),
       this.prisma.service.findMany({
+        select: { slug: true, updatedAt: true },
+        orderBy: { id: 'asc' },
+      }),
+      // В карту — только опубликованные статьи; черновики и неопубликованные адреса не отдаём.
+      this.prisma.article.findMany({
+        where: { published: true },
         select: { slug: true, updatedAt: true },
         orderBy: { id: 'asc' },
       }),
@@ -78,10 +85,17 @@ export class SeoService {
     }
     const siteUpdatedAt = newest([...products, ...services]);
     const servicesUpdatedAt = newest(services) ?? siteUpdatedAt;
+    // Раздел «Статьи» меняется вместе с самой свежей статьёй; без статей — дата каталога.
+    const articlesUpdatedAt = newest(articles) ?? siteUpdatedAt;
     const entries: Entry[] = [
       ...PUBLIC_PATHS.map((path) => ({
         path,
-        updatedAt: path === '/services' ? servicesUpdatedAt : siteUpdatedAt,
+        updatedAt:
+          path === '/services'
+            ? servicesUpdatedAt
+            : path === '/stati'
+              ? articlesUpdatedAt
+              : siteUpdatedAt,
       })),
       // Дерево каталога в ЧПУ, как canonical сайта. Старые /catalog?category=… сайт переводит сюда 301 — в карту их не отдаём.
       ...categories.flatMap((category) => [
@@ -104,6 +118,10 @@ export class SeoService {
       ...services.map((service) => ({
         path: `/services/${encodeURIComponent(service.slug)}`,
         updatedAt: service.updatedAt,
+      })),
+      ...articles.map((article) => ({
+        path: `/stati/${encodeURIComponent(article.slug)}`,
+        updatedAt: article.updatedAt,
       })),
     ];
     const prefix = '<?xml version="1.0" encoding="UTF-8"?>\n';
