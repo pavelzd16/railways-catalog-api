@@ -29,3 +29,31 @@ test('articleServiceSlugs читает slug услуг', () => {
     ['rezka-rels', 'izgotovlenie-tupikovyh-uporov'],
   );
 });
+
+test('cleanArticleHtml: схема javascript: в сущностях не проходит', () => {
+  for (const h of [
+    '<a href="&#106;avascript:a()">x</a>',
+    '<a href="jav&#x09;ascript:a()">x</a>',
+    '<a href="javascript&colon;a()">x</a>',
+    '<a href="jav&Tab;ascript:a()">x</a>',
+    '<a href="jav&NewLine;ascript:a()">x</a>',
+    '<a href=" javascript:x">x</a>',
+    '<a href="JaVaScRiPt:x">x</a>',
+  ]) assert.ok(!/javascript|href/i.test(cleanArticleHtml(h).replace(/>x<.*/, '')), h);
+});
+test('cleanArticleHtml: on* после / и после кавычки, любой регистр', () => {
+  assert.ok(!/onerror/i.test(cleanArticleHtml('<img/onerror=a()>')));
+  assert.ok(!/onclick/i.test(cleanArticleHtml('<a href="x"onclick=a()>q</a>')));
+  assert.ok(cleanArticleHtml('<a href="x"onclick=a()>q</a>').includes('href="x"'));
+  assert.ok(!/onerror/i.test(cleanArticleHtml('<img src=x ONERROR=a()>')));
+  assert.ok(!/onclick/i.test(cleanArticleHtml('<a title=">" onclick=a()>q</a>')));
+});
+test('cleanArticleHtml: action, formaction, xlink:href, srcdoc', () => {
+  assert.ok(!/javascript/i.test(cleanArticleHtml('<form action="javascript:a()"><button formaction="javascript:a()">')));
+  assert.ok(!/javascript/i.test(cleanArticleHtml('<svg><a xlink:href="javascript:a()">x</a></svg>')));
+  assert.ok(!/srcdoc/i.test(cleanArticleHtml('<div srcdoc="<b>x</b>">q</div>')));
+  assert.ok(cleanArticleHtml('<a href="/stati/x" class="c">ok</a>').includes('href="/stati/x" class="c"'));
+});
+test('cleanArticleHtml: <SCRIPT> в верхнем регистре', () => {
+  assert.equal(cleanArticleHtml('a<SCRIPT>alert(1)</SCRIPT>b'), 'ab');
+});
