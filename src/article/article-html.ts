@@ -60,45 +60,67 @@ function isUnsafeUrl(rawValue: string): boolean {
 
 function cleanTag(name: string, rest: string): string {
   const attrs: string[] = [];
-  const attrRe = /([^\s/"'=<>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]*))?/g;
+  const attrRe = /([^\s/"'=<>]+)(?:(\s*=\s*)("[^"]*"|'[^']*'|[^\s>]*))?/g;
   for (const m of rest.matchAll(attrRe)) {
     const attrName = m[1].toLowerCase();
     if (attrName.startsWith('on') || attrName === 'srcdoc') continue;
-    if (URL_ATTRS.has(attrName) && m[2] !== undefined && isUnsafeUrl(m[2]))
+    if (URL_ATTRS.has(attrName) && m[3] !== undefined && isUnsafeUrl(m[3]))
       continue;
-    attrs.push(m[0]);
+    // «<» и «>» в значении экранируем: браузер раскроет их обратно, а тег из значения не соберётся.
+    attrs.push(
+      m[3] === undefined
+        ? m[1]
+        : m[1] + m[2] + m[3].replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+    );
   }
   const selfClose = /\/\s*$/.test(rest) ? ' /' : '';
   return '<' + name + attrs.map((a) => ' ' + a).join('') + selfClose + '>';
 }
 
+// Элементы, которые убираем вместе с содержимым: исполняемые, «сырой» текст (внутри них браузер
+// читает разметку иначе, чем мы), svg/math (анимация <set>/<animate> подменяет ссылку) и служебные.
+const DROP_TAGS =
+  'script|style|iframe|frame|frameset|object|embed|applet|svg|math|noscript|textarea|title|xmp|noembed|noframes|plaintext|template|base|meta|link';
+const DROP_PAIRED = new RegExp(
+  String.raw`<(${DROP_TAGS})(?![a-z0-9])[^>]*>[^]*?<\/\1\s*>`,
+  'gi',
+);
+const DROP_SINGLE = new RegExp(
+  String.raw`<\/?(?:${DROP_TAGS})(?![a-z0-9])[^>]*>`,
+  'gi',
+);
+const DROP_LEFTOVER = new RegExp(
+  String.raw`<(?=\/?(?:${DROP_TAGS})(?![a-z0-9]))`,
+  'gi',
+);
+// Комментарий по правилам браузера: <!--> и <!---> пустые, иначе до первого --> или --!>, либо до конца.
+const COMMENT = /<!--(?:-?>|[^]*?(?:--!?>|$))/g;
+// Закрывающий тег без атрибутов | открывающий тег с парными кавычками | любой другой «<».
+const TOKEN =
+  /<\/([a-z][^\s>/]*)\s*>|<([a-z][^\s>/]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>|</gi;
+
 export function cleanArticleHtml(html: string): string {
   let out = String(html ?? '').replace(/\r\n?/g, '\n');
-  // Опасные парные теги вместе с содержимым, затем одиночные/незакрытые остатки.
+  // Опасные элементы вместе с содержимым, затем одиночные/незакрытые остатки.
   // Повторяем до стабильного результата: вложение <scr<script>ipt> иначе собирается заново.
   for (let i = 0; i < 20; i++) {
     const before = out;
-    out = out.replace(
-      /<(script|style|iframe|object|embed)(?![a-z0-9])[^>]*>[^]*?<\/\1\s*>/gi,
-      '',
-    );
-    out = out.replace(
-      /<\/?(?:script|style|iframe|object|embed)(?![a-z0-9])[^>]*>/gi,
-      '',
-    );
+    out = out.replace(DROP_PAIRED, '').replace(DROP_SINGLE, '');
+    out = out.replace(COMMENT, '');
     if (out === before) break;
   }
   // Страховка: если после лимита что-то осталось, убираем сам «<».
-  out = out.replace(
-    /<(?=\/?(?:script|style|iframe|object|embed)(?![a-z0-9]))/gi,
-    '',
+  out = out.replace(DROP_LEFTOVER, '');
+  // Один проход слева направо: в выход попадают только вычищенные теги; «<», с которого тег
+  // не разобрался (непарная кавычка, <!, <?, «a < b»), становится текстом &lt;.
+  return out.replace(
+    TOKEN,
+    (token, closeName?: string, openName?: string, rest?: string) => {
+      if (closeName !== undefined) return token;
+      if (openName !== undefined) return cleanTag(openName, rest ?? '');
+      return '&lt;';
+    },
   );
-  // Атрибуты чистим внутри каждого тега с учётом кавычек (в значении может быть «>»).
-  out = out.replace(
-    /<([a-z][^\s>/]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/gi,
-    (_tag, name: string, rest: string) => cleanTag(name, rest),
-  );
-  return out;
 }
 
 export function articleSkus(body: string): string[] {

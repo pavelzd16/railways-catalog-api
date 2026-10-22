@@ -20,6 +20,7 @@ import { ArticleService } from './article.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
 import { FindArticlesDto } from './dto/find-articles.dto';
+import { articleImageFilter } from './article-image-filter';
 
 // Картинки принимаем только отдельными multipart-запросами: текст статьи идёт JSON-ом
 // (в multipart переводы строк превращаются в CRLF).
@@ -27,6 +28,7 @@ const imageInterceptor = () =>
   FileInterceptor('image', {
     storage: memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: articleImageFilter,
   });
 
 @Controller('article')

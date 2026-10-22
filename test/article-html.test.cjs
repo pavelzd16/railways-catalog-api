@@ -63,3 +63,79 @@ test('cleanArticleHtml: вложенные теги не собираются з
     assert.ok(!/<\/?(script|style|iframe|object|embed)/i.test(cleanArticleHtml(h)), h);
   }
 });
+
+// Каждый «<» в выходе — начало вычищенного тега: открывающего без on*-атрибутов или закрывающего.
+function assertOnlyCleanTags(out, source) {
+  const tagRe = /<\/[a-z][^\s>/]*\s*>|<([a-z][^\s>/]*)((?:"[^"]*"|'[^']*'|[^>"'<])*)>|</gi;
+  for (const m of out.matchAll(tagRe)) {
+    assert.notEqual(m[0], '<', `одиночный «<» в выходе для ${source}: ${out}`);
+    if (m[2] === undefined) continue;
+    for (const a of m[2].matchAll(/([^\s/"'=<>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]*))?/g)) {
+      assert.ok(!/^on/i.test(a[1]), `${a[1]} в теге ${m[0]} для ${source}`);
+    }
+  }
+}
+
+test('cleanArticleHtml: тег с непарной кавычкой не проходит в разметку', () => {
+  const vectors = {
+    '<img src=x onerror=alert(1) title="a>': '&lt;img src=x onerror=alert(1) title="a>',
+    '<a href=x onclick="y>q</a>': '&lt;a href=x onclick="y>q</a>',
+    "<p title='a onmouseover=alert(1)>t</p>": "&lt;p title='a onmouseover=alert(1)>t</p>",
+    '<img src="x" onerror=alert(1) alt=\'>': '&lt;img src="x" onerror=alert(1) alt=\'>',
+    '<div class="a" "onclick=alert(1)>t</div>': '&lt;div class="a" "onclick=alert(1)>t</div>',
+  };
+  for (const [input, expected] of Object.entries(vectors)) {
+    const out = cleanArticleHtml(input);
+    assert.equal(out, expected, input);
+    assertOnlyCleanTags(out, input);
+  }
+});
+test('cleanArticleHtml: после тега с непарной кавычкой следующие теги всё равно чистятся', () => {
+  const out = cleanArticleHtml('<a title="x>t <img src=x onerror=alert(1)>');
+  assert.equal(out, '&lt;a title="x>t <img src=x>');
+});
+test('cleanArticleHtml: svg и math удаляются вместе с содержимым', () => {
+  for (const h of [
+    '<svg><animate attributeName="href" to="javascript:alert(1)"/><a><text>x</text></a></svg>',
+    '<svg><set attributeName="href" to="javascript:alert(1)"></set></svg>',
+    '<SVG viewBox="0 0 1 1"><svg><animate attributeName="href" values="javascript:alert(1)"/></svg></SVG>',
+    '<math><maction actiontype="statusline" xlink:href="javascript:alert(1)">x</maction></math>',
+    '<math><mi>x</mi>',
+  ]) {
+    const out = cleanArticleHtml(`a${h}b`);
+    assert.ok(!/<\/?(svg|math|animate|set|maction)/i.test(out), `${h} → ${out}`);
+    assert.ok(!/javascript/i.test(out), `${h} → ${out}`);
+    assertOnlyCleanTags(out, h);
+  }
+  assert.equal(cleanArticleHtml('a<svg><rect/></svg>b'), 'ab');
+  assert.equal(cleanArticleHtml('a<math><mi>x</mi></math>b'), 'ab');
+});
+test('cleanArticleHtml: значение атрибута не выходит из «сырого» элемента и комментария', () => {
+  for (const h of [
+    '<noscript><p title="</noscript><img src=x onerror=alert(1)>"></noscript>',
+    '<textarea><p title="</textarea><img src=x onerror=alert(1)>"></textarea>',
+    '<title><a title="</title><img src=x onerror=alert(1)>"></title>',
+    '<!-- <a title=" --> <img src=x onerror=alert(1)> "> -->',
+    '<!-- --!> <img src=x onerror=alert(1)> -->',
+    '<?x <a title="> <img src=x onerror=alert(1)>">',
+  ]) {
+    const out = cleanArticleHtml(h);
+    assertOnlyCleanTags(out, h);
+    assert.ok(!/<!--|<\/?(noscript|textarea|title)/i.test(out), `${h} → ${out}`);
+    // «<» и «>» внутри значений атрибутов экранированы — тег из значения не соберётся ни в каком контексте.
+    assert.ok(!/<img[^>]*onerror/i.test(out), `${h} → ${out}`);
+  }
+});
+test('cleanArticleHtml: base, meta и link удаляются', () => {
+  assert.equal(cleanArticleHtml('<base href="https://x/"><meta http-equiv="refresh" content="0;url=https://x"><link rel="stylesheet" href="x">t'), 't');
+});
+test('cleanArticleHtml: обычная разметка статьи не меняется', () => {
+  const html = '<h2 id="a">Заголовок</h2>\n<p>Текст <b>жирный</b>, ссылка <a href="/catalog/x" target="_blank">тут</a>.</p>\n'
+    + '<div class="tbl"><table>\n<tr><th>Тип</th><td>Р65</td></tr>\n</table></div>\n<figure>\n<img src="data:image/png;base64,AAA" alt="Схема" loading="lazy">\n'
+    + '<figcaption>Рис. 1</figcaption>\n</figure>\n[[CARD TM-0039{Высота|Масса 1 м}]]\n[[TOC]]\n<ul><li>a</li></ul><br /><hr />';
+  assert.equal(cleanArticleHtml(html), html);
+});
+test('cleanArticleHtml: «<» в тексте экранируется, в значении атрибута — тоже', () => {
+  assert.equal(cleanArticleHtml('a < b, 3<5'), 'a &lt; b, 3&lt;5');
+  assert.equal(cleanArticleHtml('<p title="a<b>c">t</p>'), '<p title="a&lt;b&gt;c">t</p>');
+});
