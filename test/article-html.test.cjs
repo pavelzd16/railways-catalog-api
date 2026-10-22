@@ -64,14 +64,16 @@ test('cleanArticleHtml: вложенные теги не собираются з
   }
 });
 
-// Каждый «<» в выходе — начало вычищенного тега: открывающего без on*-атрибутов или закрывающего.
+// Проверка «как браузер»: с каждого «<» в выходе начинается тег строгого вида — закрывающий
+// </имя> или открывающий, где каждый атрибут name либо name="значение без кавычек", и ни одного on*.
+const STRICT_TAG = /<\/[A-Za-z][A-Za-z0-9-]*\s*>|<[A-Za-z][A-Za-z0-9-]*((?:\s+[a-z][a-z0-9:-]*(?:="[^"]*")?)*)\s*\/?>/y;
 function assertOnlyCleanTags(out, source) {
-  const tagRe = /<\/[a-z][^\s>/]*\s*>|<([a-z][^\s>/]*)((?:"[^"]*"|'[^']*'|[^>"'<])*)>|</gi;
-  for (const m of out.matchAll(tagRe)) {
-    assert.notEqual(m[0], '<', `одиночный «<» в выходе для ${source}: ${out}`);
-    if (m[2] === undefined) continue;
-    for (const a of m[2].matchAll(/([^\s/"'=<>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]*))?/g)) {
-      assert.ok(!/^on/i.test(a[1]), `${a[1]} в теге ${m[0]} для ${source}`);
+  for (let at = out.indexOf('<'); at !== -1; at = out.indexOf('<', at + 1)) {
+    STRICT_TAG.lastIndex = at;
+    const m = STRICT_TAG.exec(out);
+    assert.ok(m, `с позиции ${at} не строгий тег (${JSON.stringify(out.slice(at, at + 60))}) для ${source}`);
+    for (const a of (m[1] ?? '').matchAll(/\s+([a-z][a-z0-9:-]*)(?:="[^"]*")?/g)) {
+      assert.ok(!a[1].startsWith('on'), `${a[1]} в теге ${m[0]} для ${source}`);
     }
   }
 }
@@ -92,7 +94,7 @@ test('cleanArticleHtml: тег с непарной кавычкой не про�
 });
 test('cleanArticleHtml: после тега с непарной кавычкой следующие теги всё равно чистятся', () => {
   const out = cleanArticleHtml('<a title="x>t <img src=x onerror=alert(1)>');
-  assert.equal(out, '&lt;a title="x>t <img src=x>');
+  assert.equal(out, '&lt;a title="x>t <img src="x">');
 });
 test('cleanArticleHtml: svg и math удаляются вместе с содержимым', () => {
   for (const h of [
@@ -138,4 +140,34 @@ test('cleanArticleHtml: обычная разметка статьи не мен
 test('cleanArticleHtml: «<» в тексте экранируется, в значении атрибута — тоже', () => {
   assert.equal(cleanArticleHtml('a < b, 3<5'), 'a &lt; b, 3&lt;5');
   assert.equal(cleanArticleHtml('<p title="a<b>c">t</p>'), '<p title="a&lt;b&gt;c">t</p>');
+});
+
+test('cleanArticleHtml: кавычка в начале значения без пары не открывает атрибут', () => {
+  const vectors = {
+    // браузер читал бы src="' b>'" и живой onerror
+    '<img x" src=\'" b>\' onerror=alert(1)>': '<img x src="\'&quot;" b>\' onerror=alert(1)>',
+    // браузер читал бы a="' b>" и живой onmouseover
+    '<p x\' a="\' b>"onmouseover=alert(1) >hi': '<p x a="&quot;\'" b>"onmouseover=alert(1) >hi',
+  };
+  for (const [input, expected] of Object.entries(vectors)) {
+    const out = cleanArticleHtml(input);
+    assert.equal(out, expected, input);
+    assertOnlyCleanTags(out, input);
+  }
+});
+test('cleanArticleHtml: атрибуты пишутся заново как name="value"', () => {
+  assert.equal(cleanArticleHtml("<a href='/x' title=a\"b\"c data-n=1 hidden>t</a>"), '<a href="/x" title="a&quot;b&quot;c" data-n="1" hidden>t</a>');
+  assert.equal(cleanArticleHtml('<p CLASS="c" x(y)=1 a`b=2 =3>t</p>'), '<p class="c">t</p>');
+  assert.equal(cleanArticleHtml('<a"b title="<img src=x onerror=alert(1)>">t'), '&lt;a"b title="<img src="x">">t');
+});
+test('cleanArticleHtml: в выходе каждый тег строгого вида (атрибуты name="value")', () => {
+  const vectors = [
+    '<img src=x onerror=alert(1) title="a>', '<a href=x onclick="y>q</a>', "<p title='a onmouseover=alert(1)>t</p>",
+    '<img x" src=\'" b>\' onerror=alert(1)>', '<p x\' a="\' b>"onmouseover=alert(1) >hi', '<a title=">" onclick=a()>q</a>',
+    '<a href="x"onclick=a()>q</a>', '<img/onerror=a()>', '<div srcdoc="<b>x</b>">q</div>', "<a b='\"' c=\"'\" d=`e`>",
+    '<a title=x"y z=\'w>t', '<a = "x">', '<a x=">">', '<!-- <a title=" --> <img src=x onerror=alert(1)> "> -->',
+    '<noscript><p title="</noscript><img src=x onerror=alert(1)>"></noscript>', '<svg><animate attributeName="href" to="javascript:alert(1)"/></svg>',
+    '<a/x/y=z/>', '<br/>', '<input value=a"b"c>', '<a href="&#106;avascript:a()">x</a>',
+  ];
+  for (const h of vectors) assertOnlyCleanTags(cleanArticleHtml(h), h);
 });

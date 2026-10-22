@@ -58,20 +58,35 @@ function isUnsafeUrl(rawValue: string): boolean {
   );
 }
 
+// Имя атрибута в выходе — только такого вида; всё остальное (кавычки, «<», «=», скобки) отбрасываем.
+const ATTR_NAME = /^[a-z][a-z0-9:-]*$/;
+
+// Значение без внешних парных кавычек; непарная кавычка остаётся частью значения.
+function attrValue(raw: string): string {
+  return /^(["']).*\1$/s.test(raw) ? raw.slice(1, -1) : raw;
+}
+
+// Каждый оставленный атрибут пишем заново как name="value": кавычка из значения не может
+// остаться открытой и утащить следующий текст в атрибуты.
 function cleanTag(name: string, rest: string): string {
   const attrs: string[] = [];
-  const attrRe = /([^\s/"'=<>]+)(?:(\s*=\s*)("[^"]*"|'[^']*'|[^\s>]*))?/g;
+  const attrRe = /([^\s/"'=<>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]*))?/g;
   for (const m of rest.matchAll(attrRe)) {
     const attrName = m[1].toLowerCase();
+    if (!ATTR_NAME.test(attrName)) continue;
     if (attrName.startsWith('on') || attrName === 'srcdoc') continue;
-    if (URL_ATTRS.has(attrName) && m[3] !== undefined && isUnsafeUrl(m[3]))
+    if (m[2] === undefined) {
+      attrs.push(attrName);
       continue;
-    // «<» и «>» в значении экранируем: браузер раскроет их обратно, а тег из значения не соберётся.
-    attrs.push(
-      m[3] === undefined
-        ? m[1]
-        : m[1] + m[2] + m[3].replace(/</g, '&lt;').replace(/>/g, '&gt;'),
-    );
+    }
+    const value = attrValue(m[2]);
+    if (URL_ATTRS.has(attrName) && isUnsafeUrl(value)) continue;
+    // «"», «<» и «>» — сущностями: браузер раскроет их обратно, смысл значения тот же.
+    const encoded = value
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    attrs.push(`${attrName}="${encoded}"`);
   }
   const selfClose = /\/\s*$/.test(rest) ? ' /' : '';
   return '<' + name + attrs.map((a) => ' ' + a).join('') + selfClose + '>';
@@ -96,8 +111,9 @@ const DROP_LEFTOVER = new RegExp(
 // Комментарий по правилам браузера: <!--> и <!---> пустые, иначе до первого --> или --!>, либо до конца.
 const COMMENT = /<!--(?:-?>|[^]*?(?:--!?>|$))/g;
 // Закрывающий тег без атрибутов | открывающий тег с парными кавычками | любой другой «<».
+// Имя тега — только латиница, цифры и дефис; «<a"b>» и подобное уходит в текст.
 const TOKEN =
-  /<\/([a-z][^\s>/]*)\s*>|<([a-z][^\s>/]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>|</gi;
+  /<\/([a-z][a-z0-9-]*)\s*>|<([a-z][a-z0-9-]*)(?=[\s/>])((?:"[^"]*"|'[^']*'|[^>"'])*)>|</gi;
 
 export function cleanArticleHtml(html: string): string {
   let out = String(html ?? '').replace(/\r\n?/g, '\n');

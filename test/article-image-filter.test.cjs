@@ -11,23 +11,30 @@ const { articleImageFilter } = require('../dist/src/article/article-image-filter
 const { MulterExceptionFilter } = require('../dist/src/common/multer-exception.filter');
 
 const MESSAGE = 'Можно загрузить только картинку (JPG, PNG, WEBP, GIF)';
-const decide = (mimetype) => {
+const decide = (mimetype, originalname = 'a.png') => {
   let result;
-  articleImageFilter({}, { mimetype }, (error, accept) => { result = { error, accept }; });
+  articleImageFilter({}, { mimetype, originalname }, (error, accept) => { result = { error, accept }; });
   return result;
 };
+const assertRejected = ({ error, accept }, label) => {
+  assert.equal(accept, false, label);
+  assert.equal(error.getStatus(), 400, label);
+  assert.equal(error.message, MESSAGE, label);
+};
 
-test('articleImageFilter пропускает jpeg, png, webp, gif', () => {
-  for (const type of ['image/jpeg', 'image/png', 'image/webp', 'image/gif']) {
-    assert.deepEqual(decide(type), { error: null, accept: true }, type);
+test('articleImageFilter пропускает jpeg, png, webp, gif с картиночным расширением', () => {
+  for (const [type, name] of [['image/jpeg', 'a.jpg'], ['image/jpeg', 'Фото.JPEG'], ['image/png', 'a.png'], ['image/webp', 'a.webp'], ['image/gif', 'a.GIF']]) {
+    assert.deepEqual(decide(type, name), { error: null, accept: true }, `${type} ${name}`);
   }
 });
 test('articleImageFilter отклоняет остальное ошибкой 400', () => {
   for (const type of ['image/svg+xml', 'text/html', 'application/pdf', 'application/octet-stream', '']) {
-    const { error, accept } = decide(type);
-    assert.equal(accept, false, type);
-    assert.equal(error.getStatus(), 400, type);
-    assert.equal(error.message, MESSAGE, type);
+    assertRejected(decide(type), type);
+  }
+});
+test('articleImageFilter: картиночный тип с чужим расширением — тоже 400', () => {
+  for (const name of ['x.html', 'x.svg', 'x.png.html', 'x.php', 'x', 'png', 'x.png ', '']) {
+    assertRejected(decide('image/png', name), name);
   }
 });
 
@@ -52,12 +59,12 @@ before(async () => {
 });
 after(() => app?.close());
 
-test('загрузка png проходит, html и svg — 400 с понятным текстом', async () => {
+test('загрузка png проходит; html, svg и html под видом png — 400 с понятным текстом', async () => {
   await request(app.getHttpServer())
     .post('/article/upload')
     .attach('image', Buffer.from('png'), { filename: 'a.png', contentType: 'image/png' })
     .expect(201, { name: 'a.png' });
-  for (const [filename, contentType] of [['a.html', 'text/html'], ['a.svg', 'image/svg+xml']]) {
+  for (const [filename, contentType] of [['a.html', 'text/html'], ['a.svg', 'image/svg+xml'], ['x.html', 'image/png']]) {
     const response = await request(app.getHttpServer())
       .post('/article/upload')
       .attach('image', Buffer.from('<svg onload=alert(1)>'), { filename, contentType })
