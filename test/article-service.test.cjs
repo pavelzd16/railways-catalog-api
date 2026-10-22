@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 process.env.DOTENV_CONFIG_QUIET = 'true';
 require('reflect-metadata');
-const { NotFoundException } = require('@nestjs/common');
+const { ConflictException, NotFoundException } = require('@nestjs/common');
 const { plainToInstance } = require('class-transformer');
 const { validate } = require('class-validator');
 const { ArticleService, readingMinutes } = require('../dist/src/article/article.service');
@@ -117,4 +117,16 @@ test('readingMinutes: 900 слов = 5, пустой текст = 1, теги н
   assert.equal(readingMinutes('<p></p>'), 1);
   const { service } = setup({ articles: [art('a', 'Рельсы', `<p class="a b">${words}</p>`)] });
   return service.findOneBySlug('a').then((full) => assert.equal(full.readingMinutes, 5));
+});
+
+test('повторный slug (P2002) при create и update -> ConflictException (409)', async () => {
+  const { service } = setup({ articles: [art('a', 'Рельсы')] });
+  const duplicate = () => { throw Object.assign(new Error('Unique constraint'), { code: 'P2002' }); };
+  service.prisma.article.create = duplicate;
+  service.prisma.article.update = duplicate;
+  await assert.rejects(
+    () => service.create({ slug: 'a', title: 't', description: 'd', h1: 'h', category: 'Рельсы', body: '<p>a</p>' }),
+    (e) => e instanceof ConflictException && e.message === 'Статья с таким адресом уже есть',
+  );
+  await assert.rejects(() => service.update('a', { slug: 'b' }), ConflictException);
 });

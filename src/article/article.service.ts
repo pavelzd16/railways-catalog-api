@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { buildPagination } from 'utils/build-pagination.util';
 import { fillDto } from 'utils/fill-dto';
@@ -14,6 +18,18 @@ import {
   articleSkus,
   cleanArticleHtml,
 } from './article-html';
+
+// Повторный адрес: Prisma кидает P2002 (уникальный slug) — отдаём 409 вместо 500.
+async function withSlugConflict<T>(action: () => Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') {
+      throw new ConflictException('Статья с таким адресом уже есть');
+    }
+    throw error;
+  }
+}
 
 const RELATED_LIMIT = 3;
 const WORDS_PER_MINUTE = 180;
@@ -215,18 +231,20 @@ export class ArticleService {
     let publishedAt = dto.publishedAt ? new Date(dto.publishedAt) : null;
     if (published && !publishedAt) publishedAt = new Date();
 
-    const article = await this.prisma.article.create({
-      data: {
-        slug: dto.slug,
-        title: dto.title,
-        description: dto.description,
-        h1: dto.h1,
-        category: dto.category,
-        body: cleanArticleHtml(dto.body),
-        published,
-        publishedAt,
-      },
-    });
+    const article = await withSlugConflict(() =>
+      this.prisma.article.create({
+        data: {
+          slug: dto.slug,
+          title: dto.title,
+          description: dto.description,
+          h1: dto.h1,
+          category: dto.category,
+          body: cleanArticleHtml(dto.body),
+          published,
+          publishedAt,
+        },
+      }),
+    );
 
     return fillDto(ArticleListItemRdo, this.mapListItem(article));
   }
@@ -257,10 +275,9 @@ export class ArticleService {
       data.publishedAt = new Date();
     }
 
-    const article = await this.prisma.article.update({
-      where: { id },
-      data,
-    });
+    const article = await withSlugConflict(() =>
+      this.prisma.article.update({ where: { id }, data }),
+    );
 
     return fillDto(ArticleListItemRdo, this.mapListItem(article));
   }
