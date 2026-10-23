@@ -12,6 +12,8 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { FindProductsDto, ProductSort } from './dto/find-products.dto';
 import { ProductRdo } from './rdo/product.rdo';
+import { ProductDetailRdo } from './rdo/product-detail.rdo';
+import { normDocsForGost } from 'src/normativ/norm-code';
 import { ProductsRdo } from './rdo/products.rdo';
 import { FileService } from 'src/file/file.service';
 import { ProductUpdateInput } from 'generated/prisma/models';
@@ -246,7 +248,7 @@ export class ProductService {
     });
   }
 
-  async findOneBySlug(slug: string): Promise<ProductRdo> {
+  async findOneBySlug(slug: string): Promise<ProductDetailRdo> {
     const product = await this.prisma.product.findUnique({
       where: { slug },
       include: {
@@ -280,7 +282,20 @@ export class ProductService {
       { includeSimilar: true },
     );
 
-    return fillDto(ProductRdo, mapped);
+    return fillDto(ProductDetailRdo, {
+      ...mapped,
+      normDocs: await this.findNormDocs(product.gost),
+    });
+  }
+
+  // Документы справочника /normativ (только опубликованные), чьи номера есть в строке gost.
+  private async findNormDocs(gost: string | null) {
+    if (!gost?.trim()) return [];
+    const docs = await this.prisma.normDocument.findMany({
+      where: { published: true },
+      select: { code: true, slug: true },
+    });
+    return normDocsForGost(gost, docs);
   }
 
   async create(
