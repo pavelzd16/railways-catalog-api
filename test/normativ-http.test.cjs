@@ -24,6 +24,7 @@ const fakeService = {
   async create(dto) { calls.push(['create', dto]); return { id: 'new' }; },
   async update(id, dto) { calls.push(['update', id, dto]); return { id }; },
   async setFile(id, file, fileName) { calls.push(['setFile', id, file.originalname, file.size, fileName]); return { id, hasFile: true }; },
+  async setPreviews(id, files, pageCount) { calls.push(['setPreviews', id, files.map((f) => f.originalname), pageCount]); return { id, pageCount }; },
   async delete(id) { calls.push(['delete', id]); },
 };
 
@@ -52,6 +53,7 @@ after(() => app?.close());
 
 const server = () => app.getHttpServer();
 const pdf = Buffer.from('%PDF-1.7\n%test\n');
+const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]);
 const dto = { code: 'ГОСТ 4121-96', name: 'Рельсы крановые', kind: 'gost', status: 'active', scope: 'Краны', title: 'T', description: 'D', h1: 'H', body: '<p>a</p>', weight: 'main' };
 
 test('публичные GET без токена: список и документ; нет документа — 404', async () => {
@@ -68,6 +70,7 @@ test('админские адреса и запись без токена -> 401
   await request(server()).post('/api/normativ').send(dto).expect(401);
   await request(server()).put('/api/normativ/abc').send({ name: 'x' }).expect(401);
   await request(server()).put('/api/normativ/abc/file').attach('file', pdf, 'a.pdf').expect(401);
+  await request(server()).put('/api/normativ/abc/previews').field('pageCount', '9').attach('images', png, 'a-1.png').expect(401);
   await request(server()).delete('/api/normativ/abc').expect(401);
   await request(server()).get('/api/normativ/admin/list').set('Authorization', 'Bearer bad.token.value').expect(401);
   assert.deepEqual(calls, []);
@@ -114,5 +117,33 @@ test('PUT /:id/file: больше 40 МБ -> 413', async () => {
   calls.length = 0;
   await request(server()).put('/api/normativ/abc/file').set('Authorization', auth)
     .attach('file', Buffer.alloc(40 * MB + 1, 32), { filename: 'big.pdf', contentType: 'application/pdf' }).expect(413);
+  assert.deepEqual(calls, []);
+});
+
+test('PUT /:id/previews: до трёх картинок поля images и число страниц доходят до сервиса', async () => {
+  calls.length = 0;
+  await request(server())
+    .put('/api/normativ/abc/previews').set('Authorization', auth)
+    .field('pageCount', '9')
+    .attach('images', png, { filename: 'gost-4121-96-1.png', contentType: 'image/png' })
+    .attach('images', png, { filename: 'gost-4121-96-2.webp', contentType: 'image/webp' })
+    .attach('images', png, { filename: 'gost-4121-96-3.jpg', contentType: 'image/jpeg' })
+    .expect(200);
+  assert.deepEqual(calls[0], ['setPreviews', 'abc', ['gost-4121-96-1.png', 'gost-4121-96-2.webp', 'gost-4121-96-3.jpg'], 9]);
+});
+
+test('PUT /:id/previews: не картинка, больше трёх, без картинок, без числа страниц -> 400; картинка больше 5 МБ -> 413', async () => {
+  calls.length = 0;
+  const put = () => request(server()).put('/api/normativ/abc/previews').set('Authorization', auth);
+  await put().field('pageCount', '9').attach('images', pdf, { filename: 'a.pdf', contentType: 'application/pdf' }).expect(400);
+  await put().field('pageCount', '9').attach('images', png, { filename: 'a.html', contentType: 'image/png' }).expect(400);
+  await put().field('pageCount', '9').attach('images', png, { filename: 'a.gif', contentType: 'image/gif' }).expect(400);
+  const four = put().field('pageCount', '9');
+  for (const i of [1, 2, 3, 4]) four.attach('images', png, { filename: `${i}.png`, contentType: 'image/png' });
+  await four.expect(400);
+  await put().field('pageCount', '9').expect(400);
+  await put().attach('images', png, { filename: 'a.png', contentType: 'image/png' }).expect(400);
+  await put().field('pageCount', 'много').attach('images', png, { filename: 'a.png', contentType: 'image/png' }).expect(400);
+  await put().field('pageCount', '9').attach('images', Buffer.alloc(5 * MB + 1, 1), { filename: 'big.png', contentType: 'image/png' }).expect(413);
   assert.deepEqual(calls, []);
 });

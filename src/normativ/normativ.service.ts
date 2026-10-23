@@ -32,11 +32,14 @@ import {
   normalizeCode,
 } from './norm-code';
 import {
+  NORM_PAGE_COUNT_MAX,
+  NORM_PREVIEW_MAX_FILES,
   NORM_SLUG_PATTERN,
   RELATED_PRODUCTS_LIMIT,
   RESERVED_NORM_SLUGS,
 } from './norm-constants';
 import { isPdfContent, pdfDownloadName } from './norm-pdf';
+import { isPreviewImageContent } from './norm-preview';
 
 type NormRow = Prisma.NormDocumentGetPayload<object>;
 
@@ -85,6 +88,7 @@ export class NormativService {
       scope: d.scope,
       sections: d.sections ?? [],
       hasFile: !!d.file,
+      pageCount: d.pageCount ?? null,
       updatedAt: d.updatedAt,
     };
   }
@@ -99,6 +103,7 @@ export class NormativService {
       file: d.file,
       fileName: d.fileName,
       fileSize: d.fileSize,
+      previews: d.previews ?? [],
       createdAt: d.createdAt,
     };
   }
@@ -373,9 +378,58 @@ export class NormativService {
     return this.toAdminItem(d);
   }
 
+  private async deleteFiles(paths: string[]): Promise<void> {
+    await Promise.all(paths.map((path) => this.fileService.deleteFile(path)));
+  }
+
+  // Картинки первых страниц PDF: заменяют прежние целиком (старые файлы удаляются), пишут число страниц.
+  // Сохраняются тем же FileService, что фото товаров, — у них сразу есть WebP-копии /uploads/w/….
+  async setPreviews(
+    id: string,
+    files: Express.Multer.File[],
+    pageCount: number,
+  ): Promise<NormAdminListItemRdo> {
+    if (!files.length || files.length > NORM_PREVIEW_MAX_FILES) {
+      throw new BadRequestException(
+        `Картинок страниц — от 1 до ${NORM_PREVIEW_MAX_FILES}`,
+      );
+    }
+    if (
+      !Number.isInteger(pageCount) ||
+      pageCount < 1 ||
+      pageCount > NORM_PAGE_COUNT_MAX
+    ) {
+      throw new BadRequestException('Число страниц — целое, от 1');
+    }
+    if (!files.every((file) => isPreviewImageContent(file.buffer))) {
+      throw new BadRequestException(
+        'Файл не похож на картинку JPG, PNG или WEBP',
+      );
+    }
+    const existing = await this.getById(id);
+
+    const saved: string[] = [];
+    let d: NormRow;
+    try {
+      for (const file of files)
+        saved.push(await this.fileService.saveFile(file));
+      d = await this.prisma.normDocument.update({
+        where: { id },
+        data: { previews: saved, pageCount },
+      });
+    } catch (error) {
+      await this.deleteFiles(saved);
+      throw error;
+    }
+    const stale = (existing.previews ?? []).filter((p) => !saved.includes(p));
+    await this.deleteFiles(stale);
+    return this.toAdminItem(d);
+  }
+
   async delete(id: string): Promise<void> {
     const existing = await this.getById(id);
     await this.prisma.normDocument.delete({ where: { id } });
     if (existing.file) await this.fileService.deleteFile(existing.file);
+    await this.deleteFiles(existing.previews ?? []);
   }
 }

@@ -29,5 +29,11 @@ export const NORM_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // PDF документа: ТУ и альбомы бывают большими, но файл целиком ложится в память (memoryStorage).
 export const NORM_PDF_MAX_BYTES = 40 * 1024 * 1024;
 
+// Картинки первых страниц PDF («лист документа» на сайте): до трёх штук, каждая до 5 МБ, как фото товаров.
+export const NORM_PREVIEW_MAX_FILES = 3;
+export const NORM_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
+// Число страниц — с запасом на альбомы и сборники.
+export const NORM_PAGE_COUNT_MAX = 100000;
+
 // «Наши товары по документу» под выжимкой.
 export const RELATED_PRODUCTS_LIMIT = 24;

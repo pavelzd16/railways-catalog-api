@@ -27,7 +27,7 @@ function setup({ docs = [], products = [], services = [] } = {}) {
       async findUnique({ where }) { return docs.find((d) => matches(d, where)) ?? null; },
       async create({ data }) {
         calls.create.push(data);
-        return { id: 'new', file: null, fileName: null, fileSize: null, createdAt: new Date(), updatedAt: new Date(), ...data };
+        return { id: 'new', file: null, fileName: null, fileSize: null, pageCount: null, previews: [], createdAt: new Date(), updatedAt: new Date(), ...data };
       },
       async update({ where, data }) {
         calls.update.push(data);
@@ -47,7 +47,10 @@ function setup({ docs = [], products = [], services = [] } = {}) {
     },
   };
   const files = {
-    async saveFile(file) { calls.saved.push(file.originalname); return '/uploads/new.pdf'; },
+    async saveFile(file) {
+      calls.saved.push(file.originalname);
+      return /\.pdf$/i.test(file.originalname) ? '/uploads/new.pdf' : `/uploads/img-${calls.saved.length}.${file.originalname.split('.').pop()}`;
+    },
     async deleteFile(path) { calls.deleted.push(path); },
   };
   return { service: new NormativService(prisma, files), calls, prisma };
@@ -56,7 +59,7 @@ function setup({ docs = [], products = [], services = [] } = {}) {
 const doc = (code, extra = {}) => ({
   id: extra.id ?? code, slug: code.toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-'), code, name: `Название ${code}`,
   kind: 'gost', status: 'active', replacedBy: null, introducedAt: '1997-01-01', scope: 'Область', sections: ['kranovye-relsy'],
-  sourceUrl: 'https://protect.gost.ru/', sourceName: 'Росстандарт', file: null, fileName: null, fileSize: null,
+  sourceUrl: 'https://protect.gost.ru/', sourceName: 'Росстандарт', file: null, fileName: null, fileSize: null, pageCount: null, previews: [],
   title: 'T', description: 'D', h1: 'H', body: '<p>текст</p>', weight: 'main', published: true,
   publishedAt: new Date('2026-10-01'), createdAt: new Date('2026-10-01'), updatedAt: new Date('2026-10-02'), ...extra,
 });
@@ -73,7 +76,7 @@ const validDto = {
 
 test('публичный список: только опубликованные, без body, с hasFile, естественный порядок номеров', async () => {
   const { service, calls } = setup({ docs: [
-    doc('ГОСТ 4121-96', { file: '/uploads/a.pdf' }),
+    doc('ГОСТ 4121-96', { file: '/uploads/a.pdf', pageCount: 9, previews: ['/uploads/p1.webp'] }),
     doc('ГОСТ 977-88'),
     doc('ГОСТ Р 53866-2010'),
     doc('ГОСТ 10791-2011'),
@@ -84,13 +87,16 @@ test('публичный список: только опубликованные
   assert.deepEqual(items.map((d) => d.code), ['ГОСТ 977-88', 'ГОСТ 4121-96', 'ГОСТ 10791-2011', 'ГОСТ Р 53866-2010']);
   assert.ok(items.every((d) => !('body' in d) && !('id' in d) && !('file' in d)));
   assert.deepEqual(items.map((d) => d.hasFile), [false, true, false, false]);
-  assert.deepEqual(Object.keys(items[0]).sort(), ['code', 'hasFile', 'introducedAt', 'kind', 'name', 'replacedBy', 'scope', 'sections', 'slug', 'status', 'updatedAt']);
+  assert.deepEqual(items.map((d) => d.pageCount), [null, 9, null, null]);
+  assert.deepEqual(Object.keys(items[0]).sort(), ['code', 'hasFile', 'introducedAt', 'kind', 'name', 'pageCount', 'replacedBy', 'scope', 'sections', 'slug', 'status', 'updatedAt']);
+  assert.ok(items.every((d) => !('previews' in d)), 'картинки страниц — только на странице документа');
 });
 
 test('админский список: черновики тоже, с id и published, без body', async () => {
   const { service } = setup({ docs: [doc('ГОСТ 4121-96'), doc('ГОСТ 1-1', { published: false })] });
   const { items } = await service.findAllAdmin();
   assert.deepEqual(items.map((d) => [d.id, d.published]), [['ГОСТ 1-1', false], ['ГОСТ 4121-96', true]]);
+  assert.deepEqual(items.map((d) => [d.pageCount, [...d.previews]]), [[null, []], [null, []]]);
   assert.ok(items.every((d) => !('body' in d)));
 });
 
@@ -130,6 +136,8 @@ test('страница документа: карточки из [[CARD]] с gos
   assert.deepEqual({ ...full.replacedByDoc }, { slug: 'гост-4121-96', code: 'ГОСТ 4121-96' });
   assert.equal(full.body, target.body);
   assert.equal(full.hasFile, false);
+  assert.equal(full.pageCount, null);
+  assert.deepEqual([...full.previews], []);
 
   const doc96 = await service.findOneById('new96');
   assert.deepEqual(doc96.relatedProducts.map((p) => p.sku), ['TM-0001', 'TM-0002', 'TM-0003']);
@@ -225,10 +233,51 @@ test('pdfDownloadName: без папок и служебных знаков, в�
   assert.ok(pdfDownloadName('я'.repeat(500), 'x').length <= 150);
 });
 
-test('delete удаляет запись и файл; нет документа -> 404', async () => {
-  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', file: '/uploads/a.pdf' })] });
+test('delete удаляет запись, файл и картинки страниц; нет документа -> 404', async () => {
+  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', file: '/uploads/a.pdf', previews: ['/uploads/p1.webp', '/uploads/p2.webp'] })] });
   await service.delete('a');
   assert.deepEqual(calls.delete, ['a']);
-  assert.deepEqual(calls.deleted, ['/uploads/a.pdf']);
+  assert.deepEqual(calls.deleted.sort(), ['/uploads/a.pdf', '/uploads/p1.webp', '/uploads/p2.webp']);
   await assert.rejects(() => service.delete('nope'), NotFoundException);
+});
+
+// Картинки страниц: настоящие сигнатуры форматов — сервер смотрит и на содержимое, не только на имя.
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]);
+const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 0, 0, 0]), Buffer.from('WEBPVP8 ')]);
+const image = (name, buffer, mimetype) => ({ originalname: name, mimetype, size: buffer.length, buffer });
+
+test('setPreviews: картинки по порядку, previews и pageCount в записи, прежние картинки удаляются', async () => {
+  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', file: '/uploads/a.pdf', previews: ['/uploads/old1.webp', '/uploads/old2.webp'] })] });
+  const result = await service.setPreviews('a', [
+    image('gost-4121-96-1.webp', WEBP, 'image/webp'),
+    image('gost-4121-96-2.png', PNG, 'image/png'),
+    image('gost-4121-96-3.jpg', JPEG, 'image/jpeg'),
+  ], 9);
+  assert.deepEqual(calls.saved, ['gost-4121-96-1.webp', 'gost-4121-96-2.png', 'gost-4121-96-3.jpg']);
+  assert.deepEqual(calls.update[0], { previews: ['/uploads/img-1.webp', '/uploads/img-2.png', '/uploads/img-3.jpg'], pageCount: 9 });
+  assert.deepEqual(calls.deleted.sort(), ['/uploads/old1.webp', '/uploads/old2.webp']);
+  assert.equal(result.pageCount, 9);
+  assert.deepEqual([...result.previews], ['/uploads/img-1.webp', '/uploads/img-2.png', '/uploads/img-3.jpg']);
+  assert.equal(result.file, '/uploads/a.pdf', 'PDF не трогается');
+});
+
+test('setPreviews: не картинка по содержимому, ноль или больше трёх картинок, плохое число страниц -> 400; нет документа -> 404', async () => {
+  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', previews: ['/uploads/old.webp'] })] });
+  const fakeImage = image('x.png', Buffer.from('<html>'), 'image/png');
+  await assert.rejects(() => service.setPreviews('a', [image('1.png', PNG, 'image/png'), fakeImage], 9), BadRequestException);
+  await assert.rejects(() => service.setPreviews('a', [], 9), BadRequestException);
+  const four = [1, 2, 3, 4].map((i) => image(`${i}.png`, PNG, 'image/png'));
+  await assert.rejects(() => service.setPreviews('a', four, 9), BadRequestException);
+  await assert.rejects(() => service.setPreviews('a', [image('1.png', PNG, 'image/png')], 0), BadRequestException);
+  assert.deepEqual(calls.saved, [], 'при ошибке ничего не сохраняется');
+  assert.deepEqual(calls.deleted, [], 'и прежние картинки на месте');
+  await assert.rejects(() => service.setPreviews('nope', [image('1.png', PNG, 'image/png')], 9), NotFoundException);
+});
+
+test('setPreviews: запись в базу не удалась — новые файлы удаляются, прежние остаются', async () => {
+  const { service, calls, prisma } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', previews: ['/uploads/old.webp'] })] });
+  prisma.normDocument.update = async () => { throw new Error('база недоступна'); };
+  await assert.rejects(() => service.setPreviews('a', [image('1.png', PNG, 'image/png')], 9), /база недоступна/);
+  assert.deepEqual(calls.deleted, ['/uploads/img-1.png']);
 });

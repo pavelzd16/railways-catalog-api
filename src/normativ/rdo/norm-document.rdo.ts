@@ -36,6 +36,10 @@ export class NormListItemRdo {
   @Expose()
   hasFile!: boolean;
 
+  // Число страниц PDF; null — не известно (картинки страниц ещё не загружены).
+  @Expose()
+  pageCount!: number | null;
+
   @Expose()
   updatedAt!: Date;
 }
@@ -68,6 +72,10 @@ export class NormAdminListItemRdo extends NormListItemRdo {
 
   @Expose()
   fileSize!: number | null;
+
+  // Картинки первых страниц PDF по порядку: /uploads/<uuid>.<ext>.
+  @Expose()
+  previews!: string[];
 
   @Expose()
   createdAt!: Date;

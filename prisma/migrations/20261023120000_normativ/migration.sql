@@ -15,6 +15,8 @@ CREATE TABLE "NormDocument" (
     "file" TEXT,
     "fileName" TEXT,
     "fileSize" INTEGER,
+    "pageCount" INTEGER,
+    "previews" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "title" TEXT NOT NULL,
     "description" TEXT NOT NULL,
     "h1" TEXT NOT NULL,

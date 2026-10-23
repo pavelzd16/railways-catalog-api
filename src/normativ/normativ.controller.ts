@@ -9,18 +9,25 @@ import {
   Post,
   Put,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { NormativService } from './normativ.service';
 import { CreateNormDocumentDto } from './dto/create-norm-document.dto';
 import { UpdateNormDocumentDto } from './dto/update-norm-document.dto';
 import { NormFileDto } from './dto/norm-file.dto';
-import { NORM_PDF_MAX_BYTES } from './norm-constants';
+import { NormPreviewsDto } from './dto/norm-previews.dto';
+import {
+  NORM_PDF_MAX_BYTES,
+  NORM_PREVIEW_MAX_BYTES,
+  NORM_PREVIEW_MAX_FILES,
+} from './norm-constants';
 import { normPdfFilter } from './norm-pdf';
+import { normPreviewFilter } from './norm-preview';
 
 // PDF — отдельным multipart-запросом, текст документа идёт JSON-ом (в multipart переводы строк портятся).
 // Больше лимита — 413 (MulterExceptionFilter), не PDF — 400. Имена файлов — в UTF-8 (русские названия).
@@ -30,6 +37,14 @@ const pdfInterceptor = () =>
     defParamCharset: 'utf8',
     limits: { fileSize: NORM_PDF_MAX_BYTES, files: 1 },
     fileFilter: normPdfFilter,
+  });
+
+// Картинки первых страниц: поле images, до трёх файлов по 5 МБ; четвёртый файл — 400, больше 5 МБ — 413.
+const previewsInterceptor = () =>
+  FilesInterceptor('images', NORM_PREVIEW_MAX_FILES, {
+    storage: memoryStorage(),
+    limits: { fileSize: NORM_PREVIEW_MAX_BYTES, files: NORM_PREVIEW_MAX_FILES },
+    fileFilter: normPreviewFilter,
   });
 
 @Controller('normativ')
@@ -75,6 +90,19 @@ export class NormativController {
   ) {
     if (!file) throw new BadRequestException('Файл file не передан');
     return this.normativService.setFile(id, file, form.fileName);
+  }
+
+  @Put(':id/previews')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(previewsInterceptor())
+  setPreviews(
+    @Param('id') id: string,
+    @Body() form: NormPreviewsDto,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    if (!files?.length)
+      throw new BadRequestException('Картинки images не переданы');
+    return this.normativService.setPreviews(id, files, form.pageCount);
   }
 
   @Put(':id')
