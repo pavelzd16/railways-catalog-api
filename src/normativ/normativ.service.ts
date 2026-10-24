@@ -47,6 +47,7 @@ type NormRow = Prisma.NormDocumentGetPayload<object>;
 const NOT_FOUND = 'Документ не найден';
 const CONFLICT = 'Документ с таким адресом или номером уже есть';
 const PRODUCT_INCLUDE = { category: true, subcategory: true, specs: true };
+const PREVIEWS_LOCK_PREFIX = 'normativ-document:';
 
 // Повтор slug или code: Prisma кидает P2002 — отдаём 409 вместо 500.
 async function withConflict<T>(action: () => Promise<T>): Promise<T> {
@@ -407,23 +408,58 @@ export class NormativService {
     }
   }
 
-  // Сохраняет файлы пачки и пишет в запись previews (и pageCount, если передано); при сбое новые файлы удаляются.
+  private checkPreviewLimit(count: number, adding: number): void {
+    if (count + adding > NORM_PREVIEWS_MAX) {
+      throw new BadRequestException(
+        `Картинок страниц у документа — не больше ${NORM_PREVIEWS_MAX} (уже ${count})`,
+      );
+    }
+  }
+
+  // Замок на документ до конца транзакции (общий для всех процессов): загрузки картинок страниц
+  // и удаление документа идут по очереди, список previews читается заново уже под замком.
+  private withDocumentLock<T>(
+    id: string,
+    action: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PREVIEWS_LOCK_PREFIX + id}, 0))`;
+        return action(tx);
+      },
+      { timeout: 15_000 },
+    );
+  }
+
+  // Сохраняет файлы пачки и под замком пишет previews (и pageCount, если передано): append — в конец
+  // текущего списка с проверкой предела, replace — вместо него. При любом отказе новые файлы удаляются.
+  // Возвращает запись и картинки, выпавшие из списка (их файлы удаляет вызывающий после записи).
   private async savePreviews(
     id: string,
     files: Express.Multer.File[],
-    before: string[],
+    mode: 'append' | 'replace',
     pageCount?: number,
-  ): Promise<NormRow> {
+  ): Promise<{ d: NormRow; stale: string[] }> {
     const saved: string[] = [];
     try {
       for (const file of files)
         saved.push(await this.fileService.saveFile(file));
-      return await this.prisma.normDocument.update({
-        where: { id },
-        data: {
-          previews: [...before, ...saved],
-          ...(pageCount === undefined ? {} : { pageCount }),
-        },
+      return await this.withDocumentLock(id, async (tx) => {
+        const current = await tx.normDocument.findUnique({ where: { id } });
+        if (!current) throw new NotFoundException(NOT_FOUND);
+        const before = current.previews ?? [];
+        if (mode === 'append')
+          this.checkPreviewLimit(before.length, saved.length);
+        const d = await tx.normDocument.update({
+          where: { id },
+          data: {
+            previews: mode === 'append' ? [...before, ...saved] : saved,
+            ...(pageCount === undefined ? {} : { pageCount }),
+          },
+        });
+        const stale =
+          mode === 'append' ? [] : before.filter((p) => !saved.includes(p));
+        return { d, stale };
       });
     } catch (error) {
       await this.deleteFiles(saved);
@@ -440,16 +476,19 @@ export class NormativService {
   ): Promise<NormAdminListItemRdo> {
     this.checkPreviewBatch(files);
     this.checkPageCount(pageCount);
-    const existing = await this.getById(id);
-    const d = await this.savePreviews(id, files, [], pageCount);
-    const stale = (existing.previews ?? []).filter(
-      (p) => !d.previews.includes(p),
+    await this.getById(id);
+    const { d, stale } = await this.savePreviews(
+      id,
+      files,
+      'replace',
+      pageCount,
     );
     await this.deleteFiles(stale);
     return this.toAdminItem(d);
   }
 
   // Следующая пачка картинок страниц: дописывается в конец; у документа — не больше NORM_PREVIEWS_MAX картинок.
+  // Первая проверка предела — до сохранения файлов (быстрый отказ), окончательная — под замком.
   async appendPreviews(
     id: string,
     files: Express.Multer.File[],
@@ -458,19 +497,20 @@ export class NormativService {
     this.checkPreviewBatch(files);
     if (pageCount !== undefined) this.checkPageCount(pageCount);
     const existing = await this.getById(id);
-    const before = existing.previews ?? [];
-    if (before.length + files.length > NORM_PREVIEWS_MAX) {
-      throw new BadRequestException(
-        `Картинок страниц у документа — не больше ${NORM_PREVIEWS_MAX} (уже ${before.length})`,
-      );
-    }
-    const d = await this.savePreviews(id, files, before, pageCount);
+    this.checkPreviewLimit((existing.previews ?? []).length, files.length);
+    const { d } = await this.savePreviews(id, files, 'append', pageCount);
     return this.toAdminItem(d);
   }
 
+  // Под тем же замком, что загрузка картинок: пачка, записанная до удаления, попадёт в список и будет удалена,
+  // а записанная после — получит 404 и удалит свои файлы сама.
   async delete(id: string): Promise<void> {
-    const existing = await this.getById(id);
-    await this.prisma.normDocument.delete({ where: { id } });
+    const existing = await this.withDocumentLock(id, async (tx) => {
+      const d = await tx.normDocument.findUnique({ where: { id } });
+      if (!d) throw new NotFoundException(NOT_FOUND);
+      await tx.normDocument.delete({ where: { id } });
+      return d;
+    });
     if (existing.file) await this.fileService.deleteFile(existing.file);
     await this.deleteFiles(existing.previews ?? []);
   }

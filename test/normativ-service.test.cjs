@@ -35,6 +35,8 @@ function setup({ docs = [], products = [], services = [] } = {}) {
       },
       async delete({ where }) { calls.delete.push(where.id); return docs.find((d) => d.id === where.id); },
     },
+    async $transaction(fn) { return fn(prisma); },
+    async $executeRaw() { return 0; },
     product: {
       async findMany({ where, take }) {
         calls.productQueries.push(where);
@@ -322,4 +324,116 @@ test('appendPreviews: запись в базу не удалась — новы�
   prisma.normDocument.update = async () => { throw new Error('база недоступна'); };
   await assert.rejects(() => service.appendPreviews('a', [image('1.png', PNG, 'image/png')]), /база недоступна/);
   assert.deepEqual(calls.deleted, ['/uploads/img-1.png']);
+});
+
+// Параллельные загрузки страниц: мини-Prisma с общим состоянием, каждая операция отдаёт ход другим запросам.
+// Транзакции сами по себе НЕ упорядочены (как READ COMMITTED в Postgres); очередь даёт только замок
+// pg_advisory_xact_lock, взятый через $executeRaw, — он держится до конца транзакции.
+function setupShared(initial) {
+  const rows = new Map(initial.map((d) => [d.id, { ...d, previews: [...d.previews] }]));
+  const saved = [];
+  const deleted = [];
+  const locks = new Map();
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+  const read = (id) => { const row = rows.get(id); return row ? { ...row, previews: [...row.previews] } : null; };
+  const normDocument = {
+    async findUnique({ where }) { await tick(); return read(where.id); },
+    async update({ where, data }) {
+      await tick();
+      if (!rows.has(where.id)) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      rows.set(where.id, { ...rows.get(where.id), ...data, previews: [...(data.previews ?? rows.get(where.id).previews)] });
+      return read(where.id);
+    },
+    async delete({ where }) { await tick(); const row = read(where.id); rows.delete(where.id); return row; },
+  };
+  const prisma = {
+    normDocument,
+    async $transaction(fn) {
+      const held = [];
+      const tx = {
+        normDocument,
+        async $executeRaw(strings, ...values) {
+          if (!strings.join('?').includes('pg_advisory_xact_lock')) return 0;
+          const key = values.join('|');
+          const prev = locks.get(key) ?? Promise.resolve();
+          let release;
+          const mine = new Promise((resolve) => { release = resolve; });
+          locks.set(key, prev.then(() => mine));
+          held.push(release);
+          await prev;
+          return 0;
+        },
+      };
+      try { return await fn(tx); } finally { held.forEach((release) => release()); }
+    },
+    async $executeRaw() { return 0; },
+  };
+  let seq = 0;
+  const files = {
+    async saveFile(file) { await tick(); const path = `/uploads/${file.originalname}-${++seq}`; saved.push(path); return path; },
+    async deleteFile(path) { await tick(); deleted.push(path); },
+  };
+  // Файлы на диске: прежние и сохранённые, кроме удалённых.
+  const onDisk = () => [...initial.flatMap((d) => d.previews), ...saved].filter((p) => !deleted.includes(p));
+  return { service: new NormativService(prisma, files), rows, saved, deleted, onDisk };
+}
+
+// Ни одного удалённого файла в списке и ни одного файла на диске без записи.
+function assertConsistent(state, id) {
+  const list = state.rows.get(id)?.previews ?? [];
+  assert.deepEqual(list.filter((p) => state.deleted.includes(p)), [], 'в списке нет удалённых файлов');
+  assert.deepEqual(state.onDisk().filter((p) => !list.includes(p)).sort(), [], 'на диске нет файлов без записи');
+}
+
+test('appendPreviews: две пачки одновременно — в списке все страницы, файлов без записи нет', async () => {
+  const state = setupShared([doc('ГОСТ 4121-96', { id: 'a', previews: ['/uploads/p1.webp'] })]);
+  await Promise.all([
+    state.service.appendPreviews('a', [image('a1.webp', WEBP, 'image/webp'), image('a2.webp', WEBP, 'image/webp')]),
+    state.service.appendPreviews('a', [image('b1.webp', WEBP, 'image/webp'), image('b2.webp', WEBP, 'image/webp')]),
+  ]);
+  const list = state.rows.get('a').previews;
+  assert.equal(list.length, 5, 'обе пачки в списке');
+  assert.equal(list[0], '/uploads/p1.webp');
+  assert.deepEqual([...list].sort(), ['/uploads/p1.webp', ...state.saved].sort());
+  assertConsistent(state, 'a');
+});
+
+test('appendPreviews: две пачки одновременно не обходят предел 100 — лишняя отклоняется, её файл удаляется', async () => {
+  const ninetyNine = Array.from({ length: 99 }, (_, i) => `/uploads/p${i + 1}.webp`);
+  const state = setupShared([doc('ГОСТ 4121-96', { id: 'a', previews: ninetyNine })]);
+  const results = await Promise.allSettled([
+    state.service.appendPreviews('a', [image('a.webp', WEBP, 'image/webp')]),
+    state.service.appendPreviews('a', [image('b.webp', WEBP, 'image/webp')]),
+  ]);
+  assert.deepEqual(results.map((r) => r.status).sort(), ['fulfilled', 'rejected']);
+  assert.ok(results.find((r) => r.status === 'rejected').reason instanceof BadRequestException);
+  assert.equal(state.rows.get('a').previews.length, 100);
+  assertConsistent(state, 'a');
+});
+
+test('PUT во время POST и POST во время PUT: в списке нет удалённых файлов, файлов без записи нет', async () => {
+  for (const putFirst of [true, false]) {
+    const state = setupShared([doc('ГОСТ 4121-96', { id: 'a', previews: ['/uploads/old1.webp', '/uploads/old2.webp'] })]);
+    const put = () => state.service.setPreviews('a', [image('new1.webp', WEBP, 'image/webp')], 5);
+    const post = () => state.service.appendPreviews('a', [image('more.webp', WEBP, 'image/webp')]);
+    await Promise.all(putFirst ? [put(), post()] : [post(), put()]);
+    const list = state.rows.get('a').previews;
+    assert.ok(!list.includes('/uploads/old1.webp') && !list.includes('/uploads/old2.webp'), 'старые картинки ушли из списка');
+    assert.ok(state.deleted.includes('/uploads/old1.webp') && state.deleted.includes('/uploads/old2.webp'), 'и удалены с диска');
+    assertConsistent(state, 'a');
+  }
+});
+
+test('удаление документа во время POST: файлов без записи не остаётся', async () => {
+  const later = (ticks, action) => (ticks ? new Promise((resolve) => setImmediate(resolve)).then(() => later(ticks - 1, action)) : action());
+  for (let delay = 0; delay <= 5; delay++) {
+    const state = setupShared([doc('ГОСТ 4121-96', { id: 'a', previews: ['/uploads/p1.webp'] })]);
+    const results = await Promise.allSettled([
+      state.service.appendPreviews('a', [image('a.webp', WEBP, 'image/webp')]),
+      later(delay, () => state.service.delete('a')),
+    ]);
+    assert.equal(results[1].status, 'fulfilled');
+    assert.equal(state.rows.has('a'), false);
+    assert.deepEqual(state.onDisk(), [], `ни одного файла документа на диске (удаление через ${delay} хода)`);
+  }
 });
