@@ -29,9 +29,11 @@ export const NORM_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // PDF документа: ТУ и альбомы бывают большими, но файл целиком ложится в память (memoryStorage).
 export const NORM_PDF_MAX_BYTES = 40 * 1024 * 1024;
 
-// Картинки первых страниц PDF («лист документа» на сайте): до трёх штук, каждая до 5 МБ, как фото товаров.
-export const NORM_PREVIEW_MAX_FILES = 3;
-export const NORM_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
+// Картинки страниц PDF (листалка документа на сайте): всех страниц по порядку, но не больше 100 у документа.
+// Грузятся пачками — до 20 файлов по 2 МБ в одном запросе (страница ~1400 px WebP весит 0,1–0,3 МБ).
+export const NORM_PREVIEWS_MAX = 100;
+export const NORM_PREVIEW_MAX_FILES = 20;
+export const NORM_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
 // Число страниц — с запасом на альбомы и сборники.
 export const NORM_PAGE_COUNT_MAX = 100000;
 

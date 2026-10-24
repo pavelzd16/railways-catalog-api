@@ -154,7 +154,7 @@ model NormDocument {
   file         String?
   fileName     String?
   fileSize     Int?
-  // Число страниц PDF и картинки первых страниц (/uploads/<uuid>.<ext>, по порядку) — «лист PDF» на странице документа.
+  // Число страниц PDF и картинки страниц (/uploads/<uuid>.<ext>, по порядку, до 100) — листалка на странице документа.
   pageCount    Int?
   previews     String[]  @default([])
   title        String

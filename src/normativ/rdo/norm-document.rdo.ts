@@ -73,7 +73,7 @@ export class NormAdminListItemRdo extends NormListItemRdo {
   @Expose()
   fileSize!: number | null;
 
-  // Картинки первых страниц PDF по порядку: /uploads/<uuid>.<ext>.
+  // Картинки страниц PDF по порядку (до 100): /uploads/<uuid>.<ext>.
   @Expose()
   previews!: string[];
 

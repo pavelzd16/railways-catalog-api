@@ -20,7 +20,10 @@ import { NormativService } from './normativ.service';
 import { CreateNormDocumentDto } from './dto/create-norm-document.dto';
 import { UpdateNormDocumentDto } from './dto/update-norm-document.dto';
 import { NormFileDto } from './dto/norm-file.dto';
-import { NormPreviewsDto } from './dto/norm-previews.dto';
+import {
+  NormPreviewsAppendDto,
+  NormPreviewsDto,
+} from './dto/norm-previews.dto';
 import {
   NORM_PDF_MAX_BYTES,
   NORM_PREVIEW_MAX_BYTES,
@@ -39,7 +42,7 @@ const pdfInterceptor = () =>
     fileFilter: normPdfFilter,
   });
 
-// Картинки первых страниц: поле images, до трёх файлов по 5 МБ; четвёртый файл — 400, больше 5 МБ — 413.
+// Картинки страниц: поле images, пачка до 20 файлов по 2 МБ; 21-й файл — 400, больше 2 МБ — 413.
 const previewsInterceptor = () =>
   FilesInterceptor('images', NORM_PREVIEW_MAX_FILES, {
     storage: memoryStorage(),
@@ -103,6 +106,20 @@ export class NormativController {
     if (!files?.length)
       throw new BadRequestException('Картинки images не переданы');
     return this.normativService.setPreviews(id, files, form.pageCount);
+  }
+
+  // Следующая пачка картинок страниц — дописывается в конец (первую пачку шлёт PUT, он заменяет все).
+  @Post(':id/previews')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(previewsInterceptor())
+  appendPreviews(
+    @Param('id') id: string,
+    @Body() form: NormPreviewsAppendDto,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    if (!files?.length)
+      throw new BadRequestException('Картинки images не переданы');
+    return this.normativService.appendPreviews(id, files, form.pageCount);
   }
 
   @Put(':id')

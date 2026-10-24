@@ -25,6 +25,7 @@ const fakeService = {
   async update(id, dto) { calls.push(['update', id, dto]); return { id }; },
   async setFile(id, file, fileName) { calls.push(['setFile', id, file.originalname, file.size, fileName]); return { id, hasFile: true }; },
   async setPreviews(id, files, pageCount) { calls.push(['setPreviews', id, files.map((f) => f.originalname), pageCount]); return { id, pageCount }; },
+  async appendPreviews(id, files, pageCount) { calls.push(['appendPreviews', id, files.map((f) => f.originalname), pageCount]); return { id, pageCount }; },
   async delete(id) { calls.push(['delete', id]); },
 };
 
@@ -71,6 +72,7 @@ test('админские адреса и запись без токена -> 401
   await request(server()).put('/api/normativ/abc').send({ name: 'x' }).expect(401);
   await request(server()).put('/api/normativ/abc/file').attach('file', pdf, 'a.pdf').expect(401);
   await request(server()).put('/api/normativ/abc/previews').field('pageCount', '9').attach('images', png, 'a-1.png').expect(401);
+  await request(server()).post('/api/normativ/abc/previews').attach('images', png, 'a-4.png').expect(401);
   await request(server()).delete('/api/normativ/abc').expect(401);
   await request(server()).get('/api/normativ/admin/list').set('Authorization', 'Bearer bad.token.value').expect(401);
   assert.deepEqual(calls, []);
@@ -120,7 +122,7 @@ test('PUT /:id/file: больше 40 МБ -> 413', async () => {
   assert.deepEqual(calls, []);
 });
 
-test('PUT /:id/previews: до трёх картинок поля images и число страниц доходят до сервиса', async () => {
+test('PUT /:id/previews: картинки поля images и число страниц доходят до сервиса', async () => {
   calls.length = 0;
   await request(server())
     .put('/api/normativ/abc/previews').set('Authorization', auth)
@@ -132,18 +134,49 @@ test('PUT /:id/previews: до трёх картинок поля images и чи�
   assert.deepEqual(calls[0], ['setPreviews', 'abc', ['gost-4121-96-1.png', 'gost-4121-96-2.webp', 'gost-4121-96-3.jpg'], 9]);
 });
 
-test('PUT /:id/previews: не картинка, больше трёх, без картинок, без числа страниц -> 400; картинка больше 5 МБ -> 413', async () => {
+test('PUT /:id/previews: не картинка, больше 20, без картинок, без числа страниц -> 400; картинка больше 2 МБ -> 413', async () => {
   calls.length = 0;
   const put = () => request(server()).put('/api/normativ/abc/previews').set('Authorization', auth);
   await put().field('pageCount', '9').attach('images', pdf, { filename: 'a.pdf', contentType: 'application/pdf' }).expect(400);
   await put().field('pageCount', '9').attach('images', png, { filename: 'a.html', contentType: 'image/png' }).expect(400);
   await put().field('pageCount', '9').attach('images', png, { filename: 'a.gif', contentType: 'image/gif' }).expect(400);
-  const four = put().field('pageCount', '9');
-  for (const i of [1, 2, 3, 4]) four.attach('images', png, { filename: `${i}.png`, contentType: 'image/png' });
-  await four.expect(400);
+  const many = put().field('pageCount', '30');
+  for (let i = 1; i <= 21; i++) many.attach('images', png, { filename: `${i}.png`, contentType: 'image/png' });
+  await many.expect(400);
   await put().field('pageCount', '9').expect(400);
   await put().attach('images', png, { filename: 'a.png', contentType: 'image/png' }).expect(400);
   await put().field('pageCount', 'много').attach('images', png, { filename: 'a.png', contentType: 'image/png' }).expect(400);
-  await put().field('pageCount', '9').attach('images', Buffer.alloc(5 * MB + 1, 1), { filename: 'big.png', contentType: 'image/png' }).expect(413);
+  await put().field('pageCount', '9').attach('images', Buffer.alloc(2 * MB + 1, 1), { filename: 'big.png', contentType: 'image/png' }).expect(413);
+  assert.deepEqual(calls, []);
+});
+
+test('PUT /:id/previews: пачка из 20 картинок доходит до сервиса', async () => {
+  calls.length = 0;
+  const twenty = request(server()).put('/api/normativ/abc/previews').set('Authorization', auth).field('pageCount', '45');
+  for (let i = 1; i <= 20; i++) twenty.attach('images', png, { filename: `p-${i}.png`, contentType: 'image/png' });
+  await twenty.expect(200);
+  assert.equal(calls[0][0], 'setPreviews');
+  assert.equal(calls[0][2].length, 20);
+  assert.equal(calls[0][3], 45);
+});
+
+test('POST /:id/previews: пачка дописывается; число страниц необязательно', async () => {
+  calls.length = 0;
+  const post = () => request(server()).post('/api/normativ/abc/previews').set('Authorization', auth);
+  await post().attach('images', png, { filename: 'p-21.png', contentType: 'image/png' }).attach('images', png, { filename: 'p-22.webp', contentType: 'image/webp' }).expect(201);
+  await post().field('pageCount', '45').attach('images', png, { filename: 'p-23.jpg', contentType: 'image/jpeg' }).expect(201);
+  assert.deepEqual(calls, [['appendPreviews', 'abc', ['p-21.png', 'p-22.webp'], undefined], ['appendPreviews', 'abc', ['p-23.jpg'], 45]]);
+});
+
+test('POST /:id/previews: не картинка, больше 20, без картинок, плохое число страниц -> 400; больше 2 МБ -> 413', async () => {
+  calls.length = 0;
+  const post = () => request(server()).post('/api/normativ/abc/previews').set('Authorization', auth);
+  await post().attach('images', pdf, { filename: 'a.pdf', contentType: 'application/pdf' }).expect(400);
+  const many = post();
+  for (let i = 1; i <= 21; i++) many.attach('images', png, { filename: `${i}.png`, contentType: 'image/png' });
+  await many.expect(400);
+  await post().field('pageCount', '9').expect(400);
+  await post().field('pageCount', '0').attach('images', png, { filename: 'a.png', contentType: 'image/png' }).expect(400);
+  await post().attach('images', Buffer.alloc(2 * MB + 1, 1), { filename: 'big.png', contentType: 'image/png' }).expect(413);
   assert.deepEqual(calls, []);
 });

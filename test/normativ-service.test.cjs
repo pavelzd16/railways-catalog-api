@@ -262,13 +262,13 @@ test('setPreviews: картинки по порядку, previews и pageCount �
   assert.equal(result.file, '/uploads/a.pdf', 'PDF не трогается');
 });
 
-test('setPreviews: не картинка по содержимому, ноль или больше трёх картинок, плохое число страниц -> 400; нет документа -> 404', async () => {
+test('setPreviews: не картинка по содержимому, ноль или больше 20 картинок в пачке, плохое число страниц -> 400; нет документа -> 404', async () => {
   const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', previews: ['/uploads/old.webp'] })] });
   const fakeImage = image('x.png', Buffer.from('<html>'), 'image/png');
   await assert.rejects(() => service.setPreviews('a', [image('1.png', PNG, 'image/png'), fakeImage], 9), BadRequestException);
   await assert.rejects(() => service.setPreviews('a', [], 9), BadRequestException);
-  const four = [1, 2, 3, 4].map((i) => image(`${i}.png`, PNG, 'image/png'));
-  await assert.rejects(() => service.setPreviews('a', four, 9), BadRequestException);
+  const many = Array.from({ length: 21 }, (_, i) => image(`${i + 1}.png`, PNG, 'image/png'));
+  await assert.rejects(() => service.setPreviews('a', many, 30), BadRequestException);
   await assert.rejects(() => service.setPreviews('a', [image('1.png', PNG, 'image/png')], 0), BadRequestException);
   assert.deepEqual(calls.saved, [], 'при ошибке ничего не сохраняется');
   assert.deepEqual(calls.deleted, [], 'и прежние картинки на месте');
@@ -279,5 +279,47 @@ test('setPreviews: запись в базу не удалась — новые �
   const { service, calls, prisma } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', previews: ['/uploads/old.webp'] })] });
   prisma.normDocument.update = async () => { throw new Error('база недоступна'); };
   await assert.rejects(() => service.setPreviews('a', [image('1.png', PNG, 'image/png')], 9), /база недоступна/);
+  assert.deepEqual(calls.deleted, ['/uploads/img-1.png']);
+});
+
+test('setPreviews: пачка из 20 картинок — все страницы по порядку', async () => {
+  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', previews: [] })] });
+  const twenty = Array.from({ length: 20 }, (_, i) => image(`p-${i + 1}.webp`, WEBP, 'image/webp'));
+  const result = await service.setPreviews('a', twenty, 45);
+  assert.equal(result.previews.length, 20);
+  assert.equal(calls.update[0].previews[19], '/uploads/img-20.webp');
+  assert.equal(calls.update[0].pageCount, 45);
+});
+
+test('appendPreviews: пачка дописывается в конец, прежние картинки остаются, число страниц — если передано', async () => {
+  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', pageCount: 45, previews: ['/uploads/p1.webp', '/uploads/p2.webp'] })] });
+  const result = await service.appendPreviews('a', [image('p-3.webp', WEBP, 'image/webp'), image('p-4.png', PNG, 'image/png')]);
+  assert.deepEqual(calls.update[0], { previews: ['/uploads/p1.webp', '/uploads/p2.webp', '/uploads/img-1.webp', '/uploads/img-2.png'] });
+  assert.deepEqual([...result.previews], ['/uploads/p1.webp', '/uploads/p2.webp', '/uploads/img-1.webp', '/uploads/img-2.png']);
+  assert.equal(result.pageCount, 45, 'число страниц не передано — прежнее');
+  assert.deepEqual(calls.deleted, [], 'ничего не удаляется');
+  await service.appendPreviews('a', [image('p-5.webp', WEBP, 'image/webp')], 46);
+  assert.equal(calls.update[1].pageCount, 46);
+});
+
+test('appendPreviews: больше 100 картинок у документа, больше 20 в пачке, не картинка -> 400; нет документа -> 404', async () => {
+  const ninetyNine = Array.from({ length: 99 }, (_, i) => `/uploads/p${i + 1}.webp`);
+  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', pageCount: 150, previews: ninetyNine })] });
+  const two = [image('a.webp', WEBP, 'image/webp'), image('b.webp', WEBP, 'image/webp')];
+  await assert.rejects(() => service.appendPreviews('a', two), BadRequestException);
+  await assert.rejects(() => service.appendPreviews('a', Array.from({ length: 21 }, (_, i) => image(`${i}.webp`, WEBP, 'image/webp'))), BadRequestException);
+  await assert.rejects(() => service.appendPreviews('a', [image('x.png', Buffer.from('<html>'), 'image/png')]), BadRequestException);
+  await assert.rejects(() => service.appendPreviews('a', []), BadRequestException);
+  await assert.rejects(() => service.appendPreviews('a', [image('c.webp', WEBP, 'image/webp')], 0), BadRequestException);
+  assert.deepEqual(calls.saved, [], 'при ошибке ничего не сохраняется');
+  const last = await service.appendPreviews('a', [image('c.webp', WEBP, 'image/webp')]);
+  assert.equal(last.previews.length, 100, 'сотая картинка — можно');
+  await assert.rejects(() => service.appendPreviews('nope', [image('c.webp', WEBP, 'image/webp')]), NotFoundException);
+});
+
+test('appendPreviews: запись в базу не удалась — новые файлы удаляются, прежние остаются', async () => {
+  const { service, calls, prisma } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', previews: ['/uploads/old.webp'] })] });
+  prisma.normDocument.update = async () => { throw new Error('база недоступна'); };
+  await assert.rejects(() => service.appendPreviews('a', [image('1.png', PNG, 'image/png')]), /база недоступна/);
   assert.deepEqual(calls.deleted, ['/uploads/img-1.png']);
 });

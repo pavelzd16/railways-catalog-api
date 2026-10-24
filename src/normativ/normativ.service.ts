@@ -34,6 +34,7 @@ import {
 import {
   NORM_PAGE_COUNT_MAX,
   NORM_PREVIEW_MAX_FILES,
+  NORM_PREVIEWS_MAX,
   NORM_SLUG_PATTERN,
   RELATED_PRODUCTS_LIMIT,
   RESERVED_NORM_SLUGS,
@@ -382,18 +383,21 @@ export class NormativService {
     await Promise.all(paths.map((path) => this.fileService.deleteFile(path)));
   }
 
-  // Картинки первых страниц PDF: заменяют прежние целиком (старые файлы удаляются), пишут число страниц.
-  // Сохраняются тем же FileService, что фото товаров, — у них сразу есть WebP-копии /uploads/w/….
-  async setPreviews(
-    id: string,
-    files: Express.Multer.File[],
-    pageCount: number,
-  ): Promise<NormAdminListItemRdo> {
+  // Пачка картинок страниц: от 1 до NORM_PREVIEW_MAX_FILES, по содержимому — JPEG, PNG или WEBP.
+  private checkPreviewBatch(files: Express.Multer.File[]): void {
     if (!files.length || files.length > NORM_PREVIEW_MAX_FILES) {
       throw new BadRequestException(
-        `Картинок страниц — от 1 до ${NORM_PREVIEW_MAX_FILES}`,
+        `Картинок страниц в одной пачке — от 1 до ${NORM_PREVIEW_MAX_FILES}`,
       );
     }
+    if (!files.every((file) => isPreviewImageContent(file.buffer))) {
+      throw new BadRequestException(
+        'Файл не похож на картинку JPG, PNG или WEBP',
+      );
+    }
+  }
+
+  private checkPageCount(pageCount: number): void {
     if (
       !Number.isInteger(pageCount) ||
       pageCount < 1 ||
@@ -401,28 +405,66 @@ export class NormativService {
     ) {
       throw new BadRequestException('Число страниц — целое, от 1');
     }
-    if (!files.every((file) => isPreviewImageContent(file.buffer))) {
-      throw new BadRequestException(
-        'Файл не похож на картинку JPG, PNG или WEBP',
-      );
-    }
-    const existing = await this.getById(id);
+  }
 
+  // Сохраняет файлы пачки и пишет в запись previews (и pageCount, если передано); при сбое новые файлы удаляются.
+  private async savePreviews(
+    id: string,
+    files: Express.Multer.File[],
+    before: string[],
+    pageCount?: number,
+  ): Promise<NormRow> {
     const saved: string[] = [];
-    let d: NormRow;
     try {
       for (const file of files)
         saved.push(await this.fileService.saveFile(file));
-      d = await this.prisma.normDocument.update({
+      return await this.prisma.normDocument.update({
         where: { id },
-        data: { previews: saved, pageCount },
+        data: {
+          previews: [...before, ...saved],
+          ...(pageCount === undefined ? {} : { pageCount }),
+        },
       });
     } catch (error) {
       await this.deleteFiles(saved);
       throw error;
     }
-    const stale = (existing.previews ?? []).filter((p) => !saved.includes(p));
+  }
+
+  // Картинки страниц PDF, первая пачка: заменяет прежние целиком (старые файлы удаляются), пишет число страниц.
+  // Картинки уже нужного размера (~1400 px WebP) — сайт берёт оригинал, уменьшенные копии /uploads/w/… не заводятся.
+  async setPreviews(
+    id: string,
+    files: Express.Multer.File[],
+    pageCount: number,
+  ): Promise<NormAdminListItemRdo> {
+    this.checkPreviewBatch(files);
+    this.checkPageCount(pageCount);
+    const existing = await this.getById(id);
+    const d = await this.savePreviews(id, files, [], pageCount);
+    const stale = (existing.previews ?? []).filter(
+      (p) => !d.previews.includes(p),
+    );
     await this.deleteFiles(stale);
+    return this.toAdminItem(d);
+  }
+
+  // Следующая пачка картинок страниц: дописывается в конец; у документа — не больше NORM_PREVIEWS_MAX картинок.
+  async appendPreviews(
+    id: string,
+    files: Express.Multer.File[],
+    pageCount?: number,
+  ): Promise<NormAdminListItemRdo> {
+    this.checkPreviewBatch(files);
+    if (pageCount !== undefined) this.checkPageCount(pageCount);
+    const existing = await this.getById(id);
+    const before = existing.previews ?? [];
+    if (before.length + files.length > NORM_PREVIEWS_MAX) {
+      throw new BadRequestException(
+        `Картинок страниц у документа — не больше ${NORM_PREVIEWS_MAX} (уже ${before.length})`,
+      );
+    }
+    const d = await this.savePreviews(id, files, before, pageCount);
     return this.toAdminItem(d);
   }
 
