@@ -36,6 +36,33 @@ const WORDS_PER_MINUTE = 180;
 
 type ArticleRow = Prisma.ArticleGetPayload<object>;
 
+export type ArticleProductRow = Prisma.ProductGetPayload<{
+  include: { category: true; subcategory: true; specs: true };
+}>;
+
+// Карточка товара внутри текста (статьи, выжимки норматива) — поля ArticleProductRdo.
+export function mapArticleProduct(p: ArticleProductRow) {
+  return {
+    id: p.id,
+    sku: p.sku,
+    slug: p.slug,
+    title: p.title,
+    price: p.price,
+    stock: p.stock,
+    condition: p.condition.toLowerCase(),
+    images: p.images,
+    categorySlug: p.category.slug,
+    subcategorySlug: p.subcategory?.slug ?? null,
+    categoryName: p.category.name,
+    subcategoryName: p.subcategory?.name ?? null,
+    specs: p.specs.map((s) => ({
+      label: s.label,
+      value: s.value,
+      unit: s.unit ?? null,
+    })),
+  };
+}
+
 // Время чтения считает только API: слова в тексте без тегов / 180, не меньше минуты.
 export function readingMinutes(body: string): number {
   const text = String(body ?? '').replace(/<[^>]*>/g, ' ');
@@ -140,28 +167,7 @@ export class ArticleService {
 
     return skus.flatMap((sku) => {
       const p = bySku.get(sku);
-      if (!p) return [];
-      return [
-        {
-          id: p.id,
-          sku: p.sku,
-          slug: p.slug,
-          title: p.title,
-          price: p.price,
-          stock: p.stock,
-          condition: p.condition.toLowerCase(),
-          images: p.images,
-          categorySlug: p.category.slug,
-          subcategorySlug: p.subcategory?.slug ?? null,
-          categoryName: p.category.name,
-          subcategoryName: p.subcategory?.name ?? null,
-          specs: p.specs.map((s) => ({
-            label: s.label,
-            value: s.value,
-            unit: s.unit ?? null,
-          })),
-        },
-      ];
+      return p ? [mapArticleProduct(p)] : [];
     });
   }
 

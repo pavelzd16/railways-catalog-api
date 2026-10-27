@@ -13,6 +13,7 @@ const PUBLIC_PATHS = [
   '/delivery',
   '/calculator',
   '/stati',
+  '/normativ',
   '/privacy',
 ];
 type Entry = { path: string; updatedAt?: Date };
@@ -36,39 +37,46 @@ export class SeoService {
   constructor(private readonly prisma: PrismaService) {}
 
   async sitemap(part?: number): Promise<string> {
-    const [products, services, articles, categories] = await Promise.all([
-      this.prisma.product.findMany({
-        select: {
-          slug: true,
-          updatedAt: true,
-          category: { select: { slug: true } },
-          subcategory: { select: { slug: true } },
-        },
-        orderBy: { id: 'asc' },
-      }),
-      this.prisma.service.findMany({
-        select: { slug: true, updatedAt: true },
-        orderBy: { id: 'asc' },
-      }),
-      // В карту — только опубликованные статьи; черновики и неопубликованные адреса не отдаём.
-      this.prisma.article.findMany({
-        where: { published: true },
-        select: { slug: true, updatedAt: true },
-        orderBy: { id: 'asc' },
-      }),
-      this.prisma.category.findMany({
-        select: {
-          slug: true,
-          // Пустая подкатегория — страница без товаров, в карту её не отдаём.
-          subcategories: {
-            select: { slug: true },
-            where: { products: { some: {} } },
-            orderBy: { name: 'asc' },
+    const [products, services, articles, normDocuments, categories] =
+      await Promise.all([
+        this.prisma.product.findMany({
+          select: {
+            slug: true,
+            updatedAt: true,
+            category: { select: { slug: true } },
+            subcategory: { select: { slug: true } },
           },
-        },
-        orderBy: { id: 'asc' },
-      }),
-    ]);
+          orderBy: { id: 'asc' },
+        }),
+        this.prisma.service.findMany({
+          select: { slug: true, updatedAt: true },
+          orderBy: { id: 'asc' },
+        }),
+        // В карту — только опубликованные статьи; черновики и неопубликованные адреса не отдаём.
+        this.prisma.article.findMany({
+          where: { published: true },
+          select: { slug: true, updatedAt: true },
+          orderBy: { id: 'asc' },
+        }),
+        // Справочник /normativ: тоже только опубликованные документы.
+        this.prisma.normDocument.findMany({
+          where: { published: true },
+          select: { slug: true, updatedAt: true },
+          orderBy: { id: 'asc' },
+        }),
+        this.prisma.category.findMany({
+          select: {
+            slug: true,
+            // Пустая подкатегория — страница без товаров, в карту её не отдаём.
+            subcategories: {
+              select: { slug: true },
+              where: { products: { some: {} } },
+              orderBy: { name: 'asc' },
+            },
+          },
+          orderBy: { id: 'asc' },
+        }),
+      ]);
     // Своей даты изменения у разделов и категорий в базе нет: берём самый свежий товар внутри —
     // список на странице меняется вместе с ним. Страницам без своей даты (главная, «О компании»,
     // пустой раздел) ставим дату последнего изменения каталога.
@@ -87,15 +95,17 @@ export class SeoService {
     const servicesUpdatedAt = newest(services) ?? siteUpdatedAt;
     // Раздел «Статьи» меняется вместе с самой свежей статьёй; без статей — дата каталога.
     const articlesUpdatedAt = newest(articles) ?? siteUpdatedAt;
+    // «ГОСТы и нормативы» — так же, по самому свежему документу.
+    const normativUpdatedAt = newest(normDocuments) ?? siteUpdatedAt;
+    const sectionUpdatedAt: Record<string, Date | undefined> = {
+      '/services': servicesUpdatedAt,
+      '/stati': articlesUpdatedAt,
+      '/normativ': normativUpdatedAt,
+    };
     const entries: Entry[] = [
       ...PUBLIC_PATHS.map((path) => ({
         path,
-        updatedAt:
-          path === '/services'
-            ? servicesUpdatedAt
-            : path === '/stati'
-              ? articlesUpdatedAt
-              : siteUpdatedAt,
+        updatedAt: sectionUpdatedAt[path] ?? siteUpdatedAt,
       })),
       // Дерево каталога в ЧПУ, как canonical сайта. Старые /catalog?category=… сайт переводит сюда 301 — в карту их не отдаём.
       ...categories.flatMap((category) => [
@@ -122,6 +132,10 @@ export class SeoService {
       ...articles.map((article) => ({
         path: `/stati/${encodeURIComponent(article.slug)}`,
         updatedAt: article.updatedAt,
+      })),
+      ...normDocuments.map((doc) => ({
+        path: `/normativ/${encodeURIComponent(doc.slug)}`,
+        updatedAt: doc.updatedAt,
       })),
     ];
     const prefix = '<?xml version="1.0" encoding="UTF-8"?>\n';

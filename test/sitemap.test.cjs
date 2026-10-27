@@ -23,7 +23,7 @@ test('sitemap includes database products and services with real update dates, ex
   const seo = new SeoService({
     product: { findMany: async () => [{ slug: 'rail', category: { slug: 'rails' }, subcategory: null, updatedAt }] },
     service: { findMany: async () => [{ slug: 'cutting', updatedAt }] },
-    article: { findMany: async () => [] },
+    article: { findMany: async () => [] }, normDocument: { findMany: async () => [] },
     category: { findMany: async () => [{ slug: 'rails&more', subcategories: [] }] },
   });
   const xml = await seo.sitemap();
@@ -40,7 +40,7 @@ test('sitemap lists the catalog tree on static addresses, as the site canonical'
   const seo = new SeoService({
     product: { findMany: async () => [] },
     service: { findMany: async () => [] },
-    article: { findMany: async () => [] },
+    article: { findMany: async () => [] }, normDocument: { findMany: async () => [] },
     category: { findMany: async (args) => { query = args; return [{ slug: 'rails', subcategories: [{ slug: 'r-65' }, { slug: 'узкая' }] }, { slug: 'bolts', subcategories: [] }]; } },
   });
   const xml = await seo.sitemap();
@@ -55,12 +55,12 @@ test('large catalogs split into valid sitemap chunks', async () => {
   const seo = new SeoService({
     product: { findMany: async () => Array.from({ length: 45001 }, (_, index) => ({ slug: `p-${index}`, category: { slug: 'rails' }, subcategory: null, updatedAt: new Date('2026-01-01') })) },
     service: { findMany: async () => [] },
-    article: { findMany: async () => [] }, category: { findMany: async () => [] },
+    article: { findMany: async () => [] }, normDocument: { findMany: async () => [] }, category: { findMany: async () => [] },
   });
   assert.match(await seo.sitemap(), /<sitemapindex/);
   assert.equal(((await seo.sitemap(1)).match(/<url>/g) || []).length, 45000);
-  // 9 статических адресов (с /stati) + 45001 товар: на вторую часть приходится 10.
-  assert.equal(((await seo.sitemap(2)).match(/<url>/g) || []).length, 10);
+  // 10 статических адресов (с /stati и /normativ) + 45001 товар: на вторую часть приходится 11.
+  assert.equal(((await seo.sitemap(2)).match(/<url>/g) || []).length, 11);
   await assert.rejects(seo.sitemap(3), error => error.getStatus() === 404);
 });
 test('every sitemap address has lastmod: categories take their newest product, pages the newest catalog change', async () => {
@@ -73,7 +73,7 @@ test('every sitemap address has lastmod: categories take their newest product, p
       { slug: 'bolt', category: { slug: 'bolts' }, subcategory: null, updatedAt: day(12) },
     ] },
     service: { findMany: async () => [{ slug: 'cutting', updatedAt: day(25) }, { slug: 'welding', updatedAt: day('01') }] },
-    article: { findMany: async () => [] },
+    article: { findMany: async () => [] }, normDocument: { findMany: async () => [] },
     category: { findMany: async () => [
       { slug: 'rails', subcategories: [{ slug: 'r-50' }, { slug: 'r-65' }] },
       { slug: 'bolts', subcategories: [] },
@@ -92,7 +92,7 @@ test('every sitemap address has lastmod: categories take their newest product, p
   assert.equal(lastmod('/catalog/bolts'), day(12).toISOString());
   assert.equal(lastmod('/catalog/empty'), day(25).toISOString(), 'пустой раздел — дата последнего изменения каталога');
   assert.equal(lastmod('/services'), day(25).toISOString());
-  for (const path of ['/', '/catalog', '/about', '/contacts', '/delivery', '/calculator', '/privacy'])
+  for (const path of ['/', '/catalog', '/about', '/contacts', '/delivery', '/calculator', '/privacy', '/normativ'])
     assert.equal(lastmod(path), day(25).toISOString(), path);
   assert.equal((xml.match(/<lastmod>/g) || []).length, (xml.match(/<url>/g) || []).length);
 });
@@ -113,7 +113,7 @@ test('a category name repeated in two sections gets the date of its own products
       { slug: 'b', category: { slug: 'bolts' }, subcategory: { slug: 'new' }, updatedAt: day(20) },
     ] },
     service: { findMany: async () => [] },
-    article: { findMany: async () => [] },
+    article: { findMany: async () => [] }, normDocument: { findMany: async () => [] },
     category: { findMany: async () => [{ slug: 'rails', subcategories: [{ slug: 'new' }] }, { slug: 'bolts', subcategories: [{ slug: 'new' }] }] },
   });
   const xml = await seo.sitemap();
@@ -127,6 +127,7 @@ test('published articles are listed under /stati with their own lastmod; the sec
     product: { findMany: async () => [] },
     service: { findMany: async () => [] },
     article: { findMany: async (args) => { query = args; return [{ slug: 'relsy-r65', updatedAt }]; } },
+    normDocument: { findMany: async () => [] },
     category: { findMany: async () => [] },
   });
   const xml = await seo.sitemap();
@@ -134,4 +135,19 @@ test('published articles are listed under /stati with their own lastmod; the sec
   assert.ok(xml.includes(`<loc>https://catalog.example/stati/relsy-r65</loc><lastmod>${updatedAt.toISOString()}</lastmod>`));
   assert.ok(xml.includes(`<loc>https://catalog.example/stati</loc><lastmod>${updatedAt.toISOString()}</lastmod>`), '/stati — дата самой свежей статьи');
   assert.equal(query.where.published, true, 'в карту попадают только опубликованные статьи');
+});
+test('published norm documents are listed under /normativ with their own lastmod; the section date is the newest document', async () => {
+  const updatedAt = new Date('2026-10-23T09:00:00Z');
+  let query;
+  const seo = new SeoService({
+    product: { findMany: async () => [] },
+    service: { findMany: async () => [] },
+    article: { findMany: async () => [] },
+    normDocument: { findMany: async (args) => { query = args; return [{ slug: 'gost-4121-96', updatedAt }]; } },
+    category: { findMany: async () => [] },
+  });
+  const xml = await seo.sitemap();
+  assert.ok(xml.includes(`<loc>https://catalog.example/normativ</loc><lastmod>${updatedAt.toISOString()}</lastmod>`), '/normativ — дата самого свежего документа');
+  assert.ok(xml.includes(`<loc>https://catalog.example/normativ/gost-4121-96</loc><lastmod>${updatedAt.toISOString()}</lastmod>`));
+  assert.equal(query.where.published, true, 'в карту попадают только опубликованные документы');
 });

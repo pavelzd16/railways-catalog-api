@@ -11,6 +11,7 @@ import { AuthModule } from './auth/auth.module';
 import { SeoModule } from './seo/seo.module';
 import { ChatModule } from './chat/chat.module';
 import { ArticleModule } from './article/article.module';
+import { NormativModule } from './normativ/normativ.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { ArticleModule } from './article/article.module';
     SeoModule,
     ChatModule,
     ArticleModule,
+    NormativModule,
   ],
   controllers: [],
   providers: [],
