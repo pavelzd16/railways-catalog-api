@@ -138,4 +138,9 @@ export class NormDocumentFullRdo extends NormAdminListItemRdo {
   @Expose()
   @Type(() => NormLinkRdo)
   replacedByDoc!: NormLinkRdo | null;
+
+  // Опубликованные документы, которые этот заменил (их replacedBy = его номер).
+  @Expose()
+  @Type(() => NormLinkRdo)
+  replaces!: NormLinkRdo[];
 }

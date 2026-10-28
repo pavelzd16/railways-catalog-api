@@ -437,3 +437,32 @@ test('удаление документа во время POST: файлов б�
     assert.deepEqual(state.onDisk(), [], `ни одного файла документа на диске (удаление через ${delay} хода)`);
   }
 });
+
+test('replaces: опубликованные документы, чей replacedBy - код этого, в естественном порядке; иначе []', async () => {
+  const { service } = setup({ docs: [
+    doc('ГОСТ Р 53866-2010'),
+    doc('ГОСТ 4121-96', { status: 'replaced', replacedBy: 'ГОСТ Р 53866–2010' }),
+    doc('ГОСТ 4121-76', { status: 'replaced', replacedBy: 'ГОСТ Р 53866-2010' }),
+    doc('ГОСТ 7173-54', { status: 'replaced', replacedBy: 'ГОСТ Р 53866-2010', published: false }),
+    doc('ГОСТ 8142-89', { status: 'replaced', replacedBy: 'ГОСТ 24741-2016' }),
+  ] });
+  const full = await service.findOneBySlug('гост-р-53866-2010');
+  assert.deepEqual(full.replaces.map((r) => ({ ...r })), [
+    { code: 'ГОСТ 4121-76', slug: 'гост-4121-76' },
+    { code: 'ГОСТ 4121-96', slug: 'гост-4121-96' },
+  ]);
+  const old = await service.findOneBySlug('гост-4121-96');
+  assert.deepEqual([...old.replaces], []);
+});
+
+test('removeFile: снимает PDF и картинки страниц с диска, обнуляет file, fileName, fileSize, previews, pageCount; ответ — как админский GET; нет документа -> 404', async () => {
+  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', file: '/uploads/a.pdf', fileName: 'ГОСТ 4121-96.pdf', fileSize: 100, pageCount: 2, previews: ['/uploads/p1.webp', '/uploads/p2.webp'] })] });
+  const result = await service.removeFile('a');
+  assert.deepEqual(calls.update.at(-1), { file: null, fileName: null, fileSize: null, previews: [], pageCount: null });
+  assert.deepEqual(calls.deleted.sort(), ['/uploads/a.pdf', '/uploads/p1.webp', '/uploads/p2.webp']);
+  assert.equal(result.id, 'a');
+  assert.equal(result.body, '<p>текст</p>', 'полный документ, как GET admin/:id');
+  assert.equal(result.hasFile, false);
+  assert.deepEqual(result.previews, []);
+  await assert.rejects(() => service.removeFile('nope'), NotFoundException);
+});

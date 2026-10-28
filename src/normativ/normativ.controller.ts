@@ -95,6 +95,13 @@ export class NormativController {
     return this.normativService.setFile(id, file, form.fileName);
   }
 
+  // Снять PDF и картинки страниц (документ снова «по запросу») — откат обновления, которое добавило файл.
+  @Delete(':id/file')
+  @UseGuards(JwtAuthGuard)
+  removeFile(@Param('id') id: string) {
+    return this.normativService.removeFile(id);
+  }
+
   @Put(':id/previews')
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(previewsInterceptor())

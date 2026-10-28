@@ -27,6 +27,7 @@ const fakeService = {
   async setPreviews(id, files, pageCount) { calls.push(['setPreviews', id, files.map((f) => f.originalname), pageCount]); return { id, pageCount }; },
   async appendPreviews(id, files, pageCount) { calls.push(['appendPreviews', id, files.map((f) => f.originalname), pageCount]); return { id, pageCount }; },
   async delete(id) { calls.push(['delete', id]); },
+  async removeFile(id) { calls.push(['removeFile', id]); return { id, file: null }; },
 };
 
 class TestModule {}
@@ -179,4 +180,13 @@ test('POST /:id/previews: не картинка, больше 20, без кар�
   await post().field('pageCount', '0').attach('images', png, { filename: 'a.png', contentType: 'image/png' }).expect(400);
   await post().attach('images', Buffer.alloc(2 * MB + 1, 1), { filename: 'big.png', contentType: 'image/png' }).expect(413);
   assert.deepEqual(calls, []);
+});
+
+test('DELETE /:id/file: без токена -> 401; с токеном доходит до сервиса и отдаёт документ', async () => {
+  calls.length = 0;
+  await request(server()).delete('/api/normativ/abc/file').expect(401);
+  assert.deepEqual(calls, []);
+  const res = await request(server()).delete('/api/normativ/abc/file').set('Authorization', auth).expect(200);
+  assert.deepEqual(res.body, { id: 'abc', file: null });
+  assert.deepEqual(calls, [['removeFile', 'abc']]);
 });
