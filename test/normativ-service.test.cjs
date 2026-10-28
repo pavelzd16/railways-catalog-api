@@ -454,3 +454,15 @@ test('replaces: опубликованные документы, чей replaced
   const old = await service.findOneBySlug('гост-4121-96');
   assert.deepEqual([...old.replaces], []);
 });
+
+test('removeFile: снимает PDF и картинки страниц с диска, обнуляет file, fileName, fileSize, previews, pageCount; ответ — как админский GET; нет документа -> 404', async () => {
+  const { service, calls } = setup({ docs: [doc('ГОСТ 4121-96', { id: 'a', file: '/uploads/a.pdf', fileName: 'ГОСТ 4121-96.pdf', fileSize: 100, pageCount: 2, previews: ['/uploads/p1.webp', '/uploads/p2.webp'] })] });
+  const result = await service.removeFile('a');
+  assert.deepEqual(calls.update.at(-1), { file: null, fileName: null, fileSize: null, previews: [], pageCount: null });
+  assert.deepEqual(calls.deleted.sort(), ['/uploads/a.pdf', '/uploads/p1.webp', '/uploads/p2.webp']);
+  assert.equal(result.id, 'a');
+  assert.equal(result.body, '<p>текст</p>', 'полный документ, как GET admin/:id');
+  assert.equal(result.hasFile, false);
+  assert.deepEqual(result.previews, []);
+  await assert.rejects(() => service.removeFile('nope'), NotFoundException);
+});

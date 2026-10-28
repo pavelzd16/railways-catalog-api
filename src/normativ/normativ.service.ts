@@ -524,6 +524,29 @@ export class NormativService {
     return this.toAdminItem(d);
   }
 
+  // Документ снова без файла («по запросу»): PDF и картинки страниц снимаются с диска, поля файла обнуляются.
+  // Нужен для отката обновления, которое добавило файл (zalit-normativ.mjs --otkat). Под тем же замком, что картинки.
+  async removeFile(id: string): Promise<NormDocumentFullRdo> {
+    const { d, existing } = await this.withDocumentLock(id, async (tx) => {
+      const current = await tx.normDocument.findUnique({ where: { id } });
+      if (!current) throw new NotFoundException(NOT_FOUND);
+      const updated = await tx.normDocument.update({
+        where: { id },
+        data: {
+          file: null,
+          fileName: null,
+          fileSize: null,
+          previews: [],
+          pageCount: null,
+        },
+      });
+      return { d: updated, existing: current };
+    });
+    if (existing.file) await this.fileService.deleteFile(existing.file);
+    await this.deleteFiles(existing.previews ?? []);
+    return this.toFull(d);
+  }
+
   // Под тем же замком, что загрузка картинок: пачка, записанная до удаления, попадёт в список и будет удалена,
   // а записанная после — получит 404 и удалит свои файлы сама.
   async delete(id: string): Promise<void> {
