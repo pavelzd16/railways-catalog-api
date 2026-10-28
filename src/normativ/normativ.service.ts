@@ -206,11 +206,32 @@ export class NormativService {
     return found ? { slug: found.slug, code: found.code } : null;
   }
 
+  // Какие опубликованные документы заменил этот: их replacedBy указывает на его номер.
+  private async findReplaces(
+    d: NormRow,
+  ): Promise<{ code: string; slug: string }[]> {
+    const mine = normalizeCode(d.code);
+    const published = await this.prisma.normDocument.findMany({
+      where: { published: true },
+      select: { id: true, slug: true, code: true, replacedBy: true },
+    });
+    return published
+      .filter(
+        (other) =>
+          other.id !== d.id &&
+          !!other.replacedBy &&
+          normalizeCode(other.replacedBy) === mine,
+      )
+      .sort((a, b) => compareCodes(a.code, b.code))
+      .map((other) => ({ code: other.code, slug: other.slug }));
+  }
+
   private async toFull(d: NormRow): Promise<NormDocumentFullRdo> {
-    const [products, services, replacedByDoc] = await Promise.all([
+    const [products, services, replacedByDoc, replaces] = await Promise.all([
       this.findProducts(d.body),
       this.findServices(d.body),
       this.findReplacedByDoc(d),
+      this.findReplaces(d),
     ]);
     const relatedProducts = await this.findRelatedProducts(
       d.code,
@@ -229,6 +250,7 @@ export class NormativService {
       relatedProducts: relatedProducts.map((p) => this.toNormProduct(p)),
       services,
       replacedByDoc,
+      replaces,
     });
   }
 

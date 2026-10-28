@@ -437,3 +437,20 @@ test('удаление документа во время POST: файлов б�
     assert.deepEqual(state.onDisk(), [], `ни одного файла документа на диске (удаление через ${delay} хода)`);
   }
 });
+
+test('replaces: опубликованные документы, чей replacedBy - код этого, в естественном порядке; иначе []', async () => {
+  const { service } = setup({ docs: [
+    doc('ГОСТ Р 53866-2010'),
+    doc('ГОСТ 4121-96', { status: 'replaced', replacedBy: 'ГОСТ Р 53866–2010' }),
+    doc('ГОСТ 4121-76', { status: 'replaced', replacedBy: 'ГОСТ Р 53866-2010' }),
+    doc('ГОСТ 7173-54', { status: 'replaced', replacedBy: 'ГОСТ Р 53866-2010', published: false }),
+    doc('ГОСТ 8142-89', { status: 'replaced', replacedBy: 'ГОСТ 24741-2016' }),
+  ] });
+  const full = await service.findOneBySlug('гост-р-53866-2010');
+  assert.deepEqual(full.replaces.map((r) => ({ ...r })), [
+    { code: 'ГОСТ 4121-76', slug: 'гост-4121-76' },
+    { code: 'ГОСТ 4121-96', slug: 'гост-4121-96' },
+  ]);
+  const old = await service.findOneBySlug('гост-4121-96');
+  assert.deepEqual([...old.replaces], []);
+});
