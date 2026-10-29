@@ -6,12 +6,16 @@ import {
   ValidateNested,
   IsIn,
   Min,
+  Matches,
+  ValidateIf,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import {
   parseJsonFormArrayOf,
   parseJsonFormField,
 } from 'src/common/json-form-field';
+
+export const VIDEO_PATH = /^\/uploads\/[a-z0-9][a-z0-9._-]*\.(mp4|webm)$/i;
 
 export class CreateProductSpecDto {
   @IsString()
@@ -65,6 +69,16 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   subcategorySlug?: string;
+
+  // Пустая строка или null убирают ролик.
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === '' || value === 'null' ? null : value,
+  )
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @Matches(VIDEO_PATH)
+  video?: string | null;
 
   @IsOptional()
   @IsString()

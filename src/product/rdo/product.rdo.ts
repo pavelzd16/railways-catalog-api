@@ -35,6 +35,9 @@ export class ProductRdo {
   images!: string[];
 
   @Expose()
+  video?: string | null;
+
+  @Expose()
   categorySlug!: string;
 
   @Expose()
