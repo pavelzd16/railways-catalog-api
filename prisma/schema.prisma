@@ -75,6 +75,8 @@ model Product {
   stock           Int              @default(0)
   condition       ProductCondition @default(NEW)
   images          String[]
+  // Ролик в карточке: путь /uploads/<файл>.mp4|webm; файл кладут на сервер отдельно.
+  video           String?
   description     String?
   descriptionTags String?
   analogues       String[]
