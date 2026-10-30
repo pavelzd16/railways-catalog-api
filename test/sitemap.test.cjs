@@ -68,8 +68,8 @@ test('large catalogs split into valid sitemap chunks', async () => {
   });
   assert.match(await seo.sitemap(), /<sitemapindex/);
   assert.equal(((await seo.sitemap(1)).match(/<url>/g) || []).length, 45000);
-  // 10 статических адресов (с /stati и /normativ) + 45001 товар: на вторую часть приходится 11.
-  assert.equal(((await seo.sitemap(2)).match(/<url>/g) || []).length, 11);
+  // 11 статических адресов (с /faq, /stati и /normativ) + 45001 товар: на вторую часть приходится 12.
+  assert.equal(((await seo.sitemap(2)).match(/<url>/g) || []).length, 12);
   await assert.rejects(seo.sitemap(3), error => error.getStatus() === 404);
 });
 test('every sitemap address has lastmod: categories take their newest product, pages the newest catalog change', async () => {
