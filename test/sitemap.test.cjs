@@ -35,6 +35,14 @@ test('sitemap includes database products and services with real update dates, ex
   assert.equal((xml.match(/<lastmod>/g) || []).length, (xml.match(/<url>/g) || []).length, 'lastmod у каждого адреса');
   assert.match(seo.robots(), /Sitemap: https:\/\/catalog\.example\/sitemap.xml/);
 });
+test('robots allows AI crawlers by name and keeps Sitemap as the last line', () => {
+  const robots = new SeoService({}).robots();
+  for (const bot of ['GPTBot', 'OAI-SearchBot', 'ClaudeBot', 'PerplexityBot', 'YandexGPTBot', 'Google-Extended']) {
+    assert.ok(robots.includes(`User-agent: ${bot}\nAllow: /\n`), `разрешение для ${bot}`);
+  }
+  assert.ok(robots.startsWith('User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /cart\n'));
+  assert.ok(robots.endsWith('\n\nSitemap: https://catalog.example/sitemap.xml\n'));
+});
 test('sitemap lists the catalog tree on static addresses, as the site canonical', async () => {
   let query;
   const seo = new SeoService({

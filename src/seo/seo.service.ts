@@ -177,7 +177,16 @@ export class SeoService {
   // Clean-param понимает Яндекс: адреса с метками рекламы и с поиском/фильтрами/сортировкой каталога склеиваются
   // с чистыми (на сайте у таких вариантов noindex и canonical на раздел). page не добавлять — у страниц свой canonical;
   // category и subcategory тоже — старые /catalog?category=… Яндекс должен пройти и увидеть 301 на ЧПУ.
+  // ИИ-роботам (ChatGPT, Perplexity, Claude, YandexGPT, Gemini) индексация разрешена явно, отдельной группой каждому.
   robots(): string {
+    const aiBots = [
+      'GPTBot',
+      'OAI-SearchBot',
+      'ClaudeBot',
+      'PerplexityBot',
+      'YandexGPTBot',
+      'Google-Extended',
+    ];
     return [
       'User-agent: *',
       'Allow: /',
@@ -186,6 +195,7 @@ export class SeoService {
       'Clean-param: utm_source&utm_medium&utm_campaign&utm_content&utm_term&yclid&gclid&from',
       'Clean-param: search&gost&priceMin&priceMax&condition&stock&sort&limit /catalog',
       '',
+      ...aiBots.flatMap((bot) => [`User-agent: ${bot}`, 'Allow: /', '']),
       `Sitemap: ${this.origin}/sitemap.xml`,
       '',
     ].join('\n');
