@@ -31,6 +31,7 @@ test('sitemap includes database products and services with real update dates, ex
   assert.match(xml, /https:\/\/catalog\.example\/services\/cutting/);
   assert.match(xml, /2026-03-01T12:30:00.000Z/);
   assert.ok(xml.includes('<loc>https://catalog.example/calculator</loc>'), 'страница калькулятора должна быть в карте сайта');
+  assert.ok(xml.includes('<loc>https://catalog.example/faq</loc>'), 'страница «Частые вопросы» должна быть в карте сайта');
   assert.ok(!xml.includes('/admin') && !xml.includes('/cart'));
   assert.equal((xml.match(/<lastmod>/g) || []).length, (xml.match(/<url>/g) || []).length, 'lastmod у каждого адреса');
   assert.match(seo.robots(), /Sitemap: https:\/\/catalog\.example\/sitemap.xml/);
