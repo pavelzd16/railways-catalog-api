@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   '/contacts',
   '/delivery',
   '/calculator',
+  '/faq',
   '/stati',
   '/normativ',
   '/privacy',
