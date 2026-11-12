@@ -9,6 +9,7 @@ import {
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
+import { ChatEvents } from './chat.events';
 import type { ChatActor } from './chat.service';
 import type { IncomingMessage } from 'node:http';
 
@@ -35,8 +36,12 @@ export function chatOriginAllowed(origin?: string): boolean {
 export class ChatGateway implements OnGatewayInit {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(ChatGateway.name);
-  constructor(private readonly chat: ChatService) {}
+  constructor(
+    private readonly chat: ChatService,
+    private readonly events: ChatEvents,
+  ) {}
   afterInit(server: Server) {
+    this.events.server = server;
     server.use((socket, next) => {
       this.chat
         .authenticate(socket.handshake.auth)
@@ -108,6 +113,8 @@ export class ChatGateway implements OnGatewayInit {
           .to('managers')
           .to(`chat:${result.message.conversationId}`)
           .emit('chat:message', result.message);
+      if (result.created)
+        await this.chat.publishAi(result.message.conversationId);
       return result.message;
     });
   }
@@ -126,11 +133,22 @@ export class ChatGateway implements OnGatewayInit {
   close(@ConnectedSocket() socket: Socket, @MessageBody() data: unknown) {
     return this.handle(socket, async (actor) => {
       const result = await this.chat.close(actor, data);
+      await this.chat.publishAi(result.id);
       this.server
         .to('managers')
         .to(`chat:${result.id}`)
         .emit('chat:closed', result);
       return result;
     });
+  }
+
+  @SubscribeMessage('chat:ai:mode')
+  aiMode(@ConnectedSocket() socket: Socket, @MessageBody() data: unknown) {
+    return this.handle(socket, (actor) => this.chat.aiMode(actor, data));
+  }
+
+  @SubscribeMessage('chat:ai:cancel')
+  aiCancel(@ConnectedSocket() socket: Socket, @MessageBody() data: unknown) {
+    return this.handle(socket, (actor) => this.chat.aiCancel(actor, data));
   }
 }
