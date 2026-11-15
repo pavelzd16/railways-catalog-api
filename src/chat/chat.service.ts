@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes } from 'node:crypto';
+import { ChatAiService, aiSelect } from './ai/chat-ai.service';
 import { PrismaService } from 'prisma/prisma.service';
 import {
   ChatLimiter,
@@ -47,6 +48,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly ai: ChatAiService,
   ) {}
 
   async createSession(input: unknown, ip: string) {
@@ -163,6 +165,7 @@ export class ChatService {
         take: 30,
         select: {
           ...conversationSelect,
+          ...aiSelect,
           messages: { orderBy: { id: 'desc' }, take: 1, select: messageSelect },
           _count: {
             select: {
@@ -174,11 +177,14 @@ export class ChatService {
       this.prisma.chatConversation.count({ where }),
     ]);
     return {
-      items: items.map(({ _count, messages, ...item }) => ({
-        ...item,
-        unread: _count.messages,
-        lastMessage: messages[0],
-      })),
+      items: items.map(
+        ({ _count, messages, aiEnabled, aiRevision, aiDraft, ...item }) => ({
+          ...item,
+          ai: this.ai.state({ aiEnabled, aiRevision, aiDraft }),
+          unread: _count.messages,
+          lastMessage: messages[0],
+        }),
+      ),
       total,
       page,
     };
@@ -191,7 +197,7 @@ export class ChatService {
       data.before === undefined ? undefined : positiveInt(data.before);
     const conversation = await this.prisma.chatConversation.findUnique({
       where: { id },
-      select: conversationSelect,
+      select: { ...conversationSelect, ...aiSelect },
     });
     if (!conversation) throw new NotFoundException('Переписка не найдена');
     const messages = await this.prisma.chatMessage.findMany({
@@ -200,8 +206,15 @@ export class ChatService {
       take: 51,
       select: messageSelect,
     });
+    const { aiEnabled, aiRevision, aiDraft, ...publicConversation } =
+      conversation;
     return {
-      conversation,
+      conversation: {
+        ...publicConversation,
+        ...(actor.role === 'MANAGER'
+          ? { ai: this.ai.state({ aiEnabled, aiRevision, aiDraft }) }
+          : {}),
+      },
       hasMore: messages.length > 50,
       messages: messages.slice(0, 50).reverse(),
     };
@@ -231,11 +244,21 @@ export class ChatService {
     );
     try {
       const message = await this.prisma.$transaction(async (tx) => {
-        await tx.chatConversation.update({
+        const wantsHuman =
+          actor.role === 'MANAGER' ||
+          /(?:(?:позови(?:те)?|соедини(?:те)?|переключи(?:те)?|свяжи(?:те)?|нужен)\s+(?:с\s+)?(?:жив(?:ого|ым)\s+)?|(?:хочу|можно)\s+(?:поговорить|пообщаться)\s+с\s+(?:живым\s+)?)(?:менеджер|оператор|человек)/i.test(
+            body,
+          );
+        const conversation = await tx.chatConversation.update({
           where: { id: conversationId },
-          data: { updatedAt: new Date(), closed: false },
+          data: {
+            updatedAt: new Date(),
+            closed: false,
+            aiRevision: { increment: 1 },
+            ...(wantsHuman ? { aiEnabled: false } : {}),
+          },
         });
-        return tx.chatMessage.create({
+        const result = await tx.chatMessage.create({
           data: {
             conversationId,
             clientId,
@@ -245,6 +268,10 @@ export class ChatService {
           },
           select: messageSelect,
         });
+        if (actor.role === 'VISITOR')
+          await this.ai.enqueue(tx, conversation, result.id);
+        else await this.ai.cancel(tx, conversationId);
+        return result;
       });
       return { message, created: true };
     } catch (error) {
@@ -266,7 +293,8 @@ export class ChatService {
       where: {
         conversationId,
         id: { lte: through },
-        sender: actor.role === 'MANAGER' ? 'VISITOR' : 'MANAGER',
+        sender:
+          actor.role === 'MANAGER' ? 'VISITOR' : { in: ['MANAGER', 'AI'] },
         readAt: null,
       },
       data: { readAt },
@@ -278,10 +306,32 @@ export class ChatService {
     this.authorize(actor);
     const data = record(input);
     const id = uuid(data.conversationId);
-    return this.prisma.chatConversation.update({
-      where: { id },
-      data: { closed: true },
-      select: conversationSelect,
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.chatConversation.update({
+        where: { id },
+        data: { closed: true, aiEnabled: false, aiRevision: { increment: 1 } },
+        select: conversationSelect,
+      });
+      await this.ai.cancel(tx, id);
+      return result;
     });
+  }
+
+  async aiMode(actor: ChatActor, input: unknown) {
+    this.authorize(actor);
+    const data = record(input);
+    if (typeof data.enabled !== 'boolean')
+      throw new ForbiddenException('Укажите режим ИИ');
+    return this.ai.mode(uuid(data.conversationId), data.enabled);
+  }
+
+  async aiCancel(actor: ChatActor, input: unknown) {
+    this.authorize(actor);
+    const data = record(input);
+    return this.ai.mode(uuid(data.conversationId), false, uuid(data.draftId));
+  }
+
+  publishAi(conversationId: string) {
+    return this.ai.publish(conversationId);
   }
 }
